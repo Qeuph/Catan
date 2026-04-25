@@ -897,6 +897,7 @@
     dev:        { wool:1, grain:1, ore:1 }
   };
   const SAVE_KEY = "catan_save_v3";
+  const SAVE_VERSION = 4;
 
   const state = {
     svg: null,
@@ -914,6 +915,15 @@
 
   const $ = id => document.getElementById(id);
   let activeTab = "actions";
+
+  function escapeHtml(str){
+    return String(str)
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#39;");
+  }
 
   /* ═══════════════════════════════════════════════════
      TOAST SYSTEM
@@ -949,7 +959,11 @@
     const t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     const div = document.createElement("div");
     div.className = `log-entry ${classifyLog(msg)}`;
-    div.innerHTML = `<span class="ts">${t}</span>${msg}`;
+    const ts = document.createElement("span");
+    ts.className = "ts";
+    ts.textContent = t;
+    div.appendChild(ts);
+    div.appendChild(document.createTextNode(msg));
     box.prepend(div);
   }
 
@@ -1098,9 +1112,10 @@
   function canAfford(p,cost){return Object.entries(cost).every(([r,v])=>p.resources[r]>=v);}
   function payCost(p,cost){Object.entries(cost).forEach(([r,v])=>{p.resources[r]-=v;state.bank[r]+=v;});}
   function giveResource(p,res,n=1){
-    if(state.bank[res]<n)n=state.bank[res];
-    if(n<=0){log(`Bank of ${res} is depleted.`);return;}
-    p.resources[res]+=n;state.bank[res]-=n;
+    const granted=Math.min(n,state.bank[res]||0);
+    if(granted<=0){log(`Bank of ${res} is depleted.`);return 0;}
+    p.resources[res]+=granted;state.bank[res]-=granted;
+    return granted;
   }
 
   /* ═══════════════════════════════════════════════════
@@ -1146,9 +1161,10 @@
         const h=state.hexes[hid];
         if(h.robber||h.token!==total||h.resource==="desert")return;
         const amt=i.type==="city"?2:1;
-        giveResource(state.players[i.owner],h.resource,amt);
+        const granted=giveResource(state.players[i.owner],h.resource,amt);
+        if(granted<=0)return;
         if(!gains[i.owner])gains[i.owner]={};
-        gains[i.owner][h.resource]=(gains[i.owner][h.resource]||0)+amt;
+        gains[i.owner][h.resource]=(gains[i.owner][h.resource]||0)+granted;
       });
     });
     Object.entries(gains).forEach(([pid,res])=>{
@@ -1333,12 +1349,17 @@
     const e=state.edges[edgeId];
     return e.owner===null&&(e.a===fromIntId||e.b===fromIntId);
   }
+  function canConnectRoadAtIntersection(pid,intId){
+    const inter=state.intersections[intId];
+    if(!inter)return false;
+    if(inter.owner===pid)return true;
+    if(inter.owner!==null&&inter.owner!==pid)return false;
+    return state.edges.some(e=>e.owner===pid&&(e.a===intId||e.b===intId));
+  }
   function eligibleRoadEdges(pid){
     return state.edges.filter(e=>{
       if(e.owner!==null)return false;
-      const cs=[e.a,e.b].some(i=>state.intersections[i].owner===pid);
-      const cr=[e.a,e.b].some(i=>state.edges.some(er=>er.owner===pid&&(er.a===i||er.b===i)));
-      return cs||cr;
+      return canConnectRoadAtIntersection(pid,e.a)||canConnectRoadAtIntersection(pid,e.b);
     }).map(e=>e.id);
   }
   function eligibleSettlementSpots(pid){
@@ -1367,15 +1388,73 @@
   ═══════════════════════════════════════════════════ */
   function saveGame(){
     try{
-      localStorage.setItem(SAVE_KEY,JSON.stringify(state,(k,v)=>k==="svg"?undefined:v));
+      const data={
+        hexes:state.hexes,
+        intersections:state.intersections,
+        edges:state.edges,
+        players:state.players,
+        devDeck:state.devDeck,
+        current:state.current,
+        diceRolled:state.diceRolled,
+        lastRoll:state.lastRoll,
+        phase:state.phase,
+        setupOrder:state.setupOrder,
+        setupStep:state.setupStep,
+        robberHex:state.robberHex,
+        pendingAction:state.pendingAction,
+        turn:state.turn,
+        bank:state.bank,
+        largestArmyOwner:state.largestArmyOwner,
+        longestRoadOwner:state.longestRoadOwner,
+        devCardPlayedThisTurn:state.devCardPlayedThisTurn,
+        discardQueue:state.discardQueue
+      };
+      localStorage.setItem(SAVE_KEY,JSON.stringify({version:SAVE_VERSION,data}));
     }catch(e){}
+  }
+  function isValidResMap(obj){
+    return !!obj&&RES.every(r=>Number.isFinite(obj[r])&&obj[r]>=0);
+  }
+  function isValidSavedData(d){
+    if(!d||typeof d!=="object")return false;
+    if(!Array.isArray(d.hexes)||!Array.isArray(d.intersections)||!Array.isArray(d.edges))return false;
+    if(!Array.isArray(d.players)||!Array.isArray(d.devDeck)||!Array.isArray(d.setupOrder))return false;
+    if(!isValidResMap(d.bank))return false;
+    if(!Number.isInteger(d.current)||!Number.isInteger(d.turn))return false;
+    if(typeof d.phase!=="string")return false;
+    return d.players.every(p=>p&&typeof p==="object"&&typeof p.name==="string"&&isValidResMap(p.resources));
+  }
+  function hydrateStateFromSave(saved){
+    state.hexes=saved.hexes;
+    state.intersections=saved.intersections;
+    state.edges=saved.edges;
+    state.players=saved.players;
+    state.devDeck=saved.devDeck;
+    state.current=Math.max(0,Math.min(saved.current,state.players.length-1));
+    state.diceRolled=!!saved.diceRolled;
+    state.lastRoll=saved.lastRoll??null;
+    state.phase=saved.phase;
+    state.setupOrder=saved.setupOrder;
+    state.setupStep=Number.isInteger(saved.setupStep)?saved.setupStep:0;
+    state.robberHex=Number.isInteger(saved.robberHex)?saved.robberHex:null;
+    state.pendingAction=null;
+    state.turn=Math.max(1,saved.turn||1);
+    state.bank=saved.bank;
+    state.largestArmyOwner=Number.isInteger(saved.largestArmyOwner)?saved.largestArmyOwner:null;
+    state.longestRoadOwner=Number.isInteger(saved.longestRoadOwner)?saved.longestRoadOwner:null;
+    state.aiThinking=false;
+    state.devCardPlayedThisTurn=false;
+    state.discardQueue=[];
+    state.renderQueued=false;
   }
   function loadGame(){
     const d=localStorage.getItem(SAVE_KEY) || localStorage.getItem("catan_save_v2");
     if(!d)return false;
     try{
-      const saved=JSON.parse(d);
-      Object.assign(state,saved);
+      const parsed=JSON.parse(d);
+      const saved=parsed?.data&&typeof parsed.version==="number" ? parsed.data : parsed;
+      if(!isValidSavedData(saved))return false;
+      hydrateStateFromSave(saved);
       state.svg=$("boardSvg");
       if(!state.intersections?.some(i=>i.port))assignPorts();
       render();return true;
@@ -1800,7 +1879,14 @@
   function fillSelectors(){
     const opts=()=>RES.map(r=>`<option value="${r}">${RES_ICONS[r]} ${r}</option>`).join("");
     ["tradeGive","tradeGet","offerGive","offerWant"].forEach(id=>$(id).innerHTML=opts());
-    $("offerTo").innerHTML=state.players.map((p,i)=>`<option value="${i}">${p.name}</option>`).join("");
+    const offerTo=$("offerTo");
+    offerTo.textContent="";
+    state.players.forEach((p,i)=>{
+      const option=document.createElement("option");
+      option.value=String(i);
+      option.textContent=p.name;
+      offerTo.appendChild(option);
+    });
   }
 
   function renderPanels(){
@@ -1868,7 +1954,7 @@
       const vpPct=Math.min(100,(vp/10)*100);
       div.innerHTML=`
         <div class="player-card-header">
-          <span class="player-name" style="color:${pl.color}">${pl.name}${pl.isAI?` <small style="opacity:.6;font-size:10px;">${pl.aiLevel.replace("ai-","AI ").replace("easy","Easy").replace("normal","Normal").replace("hard","Hard")}</small>`:""} ${badges}</span>
+          <span class="player-name" style="color:${pl.color}">${escapeHtml(pl.name)}${pl.isAI?` <small style="opacity:.6;font-size:10px;">${pl.aiLevel.replace("ai-","AI ").replace("easy","Easy").replace("normal","Normal").replace("hard","Hard")}</small>`:""} ${badges}</span>
           <span class="player-vp">⚑ ${vp} VP</span>
         </div>
         <div class="vp-bar-wrap"><div class="vp-bar-fill" style="width:${vpPct}%"></div></div>
@@ -1938,11 +2024,11 @@
     $("quickStats").innerHTML=`
       <div class="stats-grid">
         <div class="stat-box"><strong>Current VP:</strong> ${countVP(p.id)} / 10</div>
-        <div class="stat-box"><strong>Round:</strong> ${state.turn} · <strong>Player:</strong> ${p.name}</div>
+        <div class="stat-box"><strong>Round:</strong> ${state.turn} · <strong>Player:</strong> ${escapeHtml(p.name)}</div>
         <div class="stat-box"><strong>Dev Deck:</strong> ${state.devDeck.length} cards left</div>
         <div class="stat-box"><strong>Last Roll:</strong> ${state.lastRoll ?? "—"}</div>
-        <div class="stat-box"><strong>Longest Road:</strong> ${longest}</div>
-        <div class="stat-box"><strong>Largest Army:</strong> ${army}</div>
+        <div class="stat-box"><strong>Longest Road:</strong> ${escapeHtml(longest)}</div>
+        <div class="stat-box"><strong>Largest Army:</strong> ${escapeHtml(army)}</div>
       </div>
       <div class="bank-rack">${bankChips}</div>
     `;
@@ -2030,7 +2116,7 @@
       renderNow();
       setTimeout(()=>{
         showModal("🏆 Game Over!",
-          `<div class="winner-msg">🎊 ${p.name} wins with ${vp} VP! 🎊</div>
+          `<div class="winner-msg">🎊 ${escapeHtml(p.name)} wins with ${vp} VP! 🎊</div>
            <p style="text-align:center;color:var(--ink-muted);margin-top:8px;">Congratulations!</p>`,
           "Play Again","Close",()=>startGame());
         log(`${p.name} wins the game with ${vp} VP! 🏆`);
@@ -2072,8 +2158,12 @@
   function doYearOfPlenty(res){
     if(state.pendingAction?.type!=="year-of-plenty")return;
     const p=currentPlayer();
-    giveResource(p,res,1);
-    state.pendingAction.remaining--;
+    const granted=giveResource(p,res,1);
+    if(granted<=0){
+      toast(`Bank has no ${res}. Pick a different resource.`);
+      return;
+    }
+    state.pendingAction.remaining-=granted;
     if(state.pendingAction.remaining<=0){
       log(`${p.name} used Year of Plenty.`);
       state.pendingAction=null;$("modal").classList.remove("open");render();
@@ -2157,7 +2247,7 @@
     const body=`
       <div style="text-align:center;padding:10px 0;">
         <div style="font-size:32px;margin-bottom:8px;">${RES_ICONS[give]}</div>
-        <div>${p.name} offers <strong>${giveQty}× ${give}</strong><br>in exchange for <strong>${wantQty}× ${want}</strong> ${RES_ICONS[want]}</div>
+        <div>${escapeHtml(p.name)} offers <strong>${giveQty}× ${escapeHtml(give)}</strong><br>in exchange for <strong>${wantQty}× ${escapeHtml(want)}</strong> ${RES_ICONS[want]}</div>
       </div>
     `;
     showModal(`Trade offer for ${op.name}`,body,"Accept","Reject",
@@ -2471,9 +2561,8 @@
         "Welcome to Catan",
         `<p style="color:var(--ink-muted);line-height:1.6;margin-bottom:10px;">Collect resources, build roads and settlements, and race to 10 Victory Points.</p>
          <p style="color:var(--ink-muted);line-height:1.6;">Configure players above, then click <strong>New Game</strong> — or just start here.</p>`,
-        "Start Game","",()=>startGame()
+        "Start Game",null,()=>startGame()
       );
-      startGame();
     } else {
       log("Welcome back! Game loaded from storage.");
       toast("♻️ Game restored from last session.");
