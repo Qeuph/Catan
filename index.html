@@ -126,6 +126,15 @@
       font-size: 13px;
     }
     .player.active { box-shadow: inset 0 0 0 1px rgba(255,255,255,.35); }
+    .player.eligible-victim {
+      border: 2px dashed var(--accent) !important;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.7; }
+      100% { opacity: 1; }
+    }
     .resources {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -171,9 +180,20 @@
       padding: 16px;
     }
     .winner {
-      font-size: 20px;
+      font-size: 24px;
+      font-weight: bold;
       color: var(--ok);
-      margin: 8px 0;
+      margin: 12px 0;
+      text-align: center;
+    }
+    .modal-content {
+      margin-top: 12px;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+      justify-content: flex-end;
     }
     .tokenText {
       font-weight: 700;
@@ -282,16 +302,18 @@
 
   <div id="modal" class="modal">
     <div class="card">
-      <h2>About this implementation</h2>
-      <p style="margin-top:6px; color: var(--muted); line-height:1.5;">
-        This is a complete single-file digital adaptation of Catan core gameplay for local pass-and-play.
-        It includes full board generation, setup placement, dice resource production, robber handling,
-        roads/settlements/cities, development cards (Knight, Road Building, Year of Plenty, Monopoly,
-        and hidden victory points), largest army / longest road scoring, turn order, bank and player trading,
-        and automatic win detection at 10 victory points.
-      </p>
-      <div id="winnerBox"></div>
-      <div class="row" style="margin-top:12px;">
+      <h2 id="modalTitle">About this implementation</h2>
+      <div id="modalBody" class="modal-content">
+        <p style="color: var(--muted); line-height:1.5;">
+          This is a complete single-file digital adaptation of Catan core gameplay for local pass-and-play.
+          It includes full board generation, setup placement, dice resource production, robber handling,
+          roads/settlements/cities, development cards (Knight, Road Building, Year of Plenty, Monopoly,
+          and hidden victory points), largest army / longest road scoring, turn order, bank and player trading,
+          and automatic win detection at 10 victory points.
+        </p>
+      </div>
+      <div class="modal-actions">
+        <button id="modalSecondaryBtn" style="display:none;"></button>
         <button id="closeModal" class="primary">Start / Continue</button>
       </div>
     </div>
@@ -299,6 +321,13 @@
 
   <script>
     const RES = ["brick", "lumber", "wool", "grain", "ore"];
+    const RES_ICONS = {
+      brick: "🧱",
+      lumber: "🪵",
+      wool: "🐑",
+      grain: "🌾",
+      ore: "⛏️"
+    };
     const HEX_COLORS = {
       brick: "#c96b4f",
       lumber: "#4e8d5a",
@@ -334,7 +363,9 @@
       bank: { brick: 19, lumber: 19, wool: 19, grain: 19, ore: 19 },
       largestArmyOwner: null,
       longestRoadOwner: null,
-      aiThinking: false
+      aiThinking: false,
+      devCardPlayedThisTurn: false,
+      discardQueue: []
     };
 
     const el = (id) => document.getElementById(id);
@@ -501,7 +532,7 @@
     function currentPlayer() { return state.players[state.current]; }
 
     function isDevPlayable(card, playerId) {
-      return card.boughtTurn < state.turn || card.boughtBy !== playerId;
+      return card.boughtTurn < state.turn;
     }
 
     function canAfford(player, cost) {
@@ -580,7 +611,20 @@
       });
     }
 
+    function stealFrom(victimId) {
+      const victim = state.players[victimId];
+      const pool = [];
+      RES.forEach(r => { for (let k=0;k<victim.resources[r];k++) pool.push(r); });
+      if (pool.length) {
+        const stolen = pool[Math.floor(Math.random() * pool.length)];
+        victim.resources[stolen]--;
+        currentPlayer().resources[stolen]++;
+        log(`${currentPlayer().name} stole 1 ${stolen} from ${victim.name}.`);
+      }
+    }
+
     function moveRobber(hexId, actingPid) {
+      if (hexId === state.robberHex) return;
       state.hexes[state.robberHex].robber = false;
       state.robberHex = hexId;
       state.hexes[hexId].robber = true;
@@ -589,34 +633,53 @@
         if (i.owner !== null && i.owner !== actingPid && i.adjHex.includes(hexId)) victims.add(i.owner);
       });
       if (victims.size) {
-        const vid = [...victims][Math.floor(Math.random() * victims.size)];
-        const victim = state.players[vid];
-        const pool = [];
-        RES.forEach(r => { for (let k=0;k<victim.resources[r];k++) pool.push(r); });
-        if (pool.length) {
-          const stolen = pool[Math.floor(Math.random() * pool.length)];
-          victim.resources[stolen]--;
-          currentPlayer().resources[stolen]++;
-          log(`${currentPlayer().name} moved robber and stole 1 ${stolen} from ${victim.name}.`);
+        if (currentPlayer().isAI) {
+          const vid = [...victims][Math.floor(Math.random() * victims.size)];
+          stealFrom(vid);
+        } else {
+          state.pendingAction = { type: "steal", victims: [...victims] };
+          log(`Choose a player to steal from.`);
         }
       } else log(`${currentPlayer().name} moved robber.`);
     }
 
     function maybeDiscardOnSeven() {
-      state.players.forEach(p => {
-        const total = RES.reduce((s,r)=>s+p.resources[r],0);
-        if (total > 7) {
-          let discard = Math.floor(total / 2);
-          while (discard > 0) {
-            const avail = RES.filter(r => p.resources[r] > 0);
-            const rr = avail[Math.floor(Math.random() * avail.length)];
-            p.resources[rr]--;
-            state.bank[rr]++;
-            discard--;
-          }
-          log(`${p.name} discarded half resources due to rolling 7.`);
+      const affected = state.players.filter(p => RES.reduce((s, r) => s + p.resources[r], 0) > 7);
+      if (affected.length > 0) {
+        state.discardQueue = affected.map(p => ({
+          pid: p.id,
+          count: Math.floor(RES.reduce((s, r) => s + p.resources[r], 0) / 2)
+        }));
+        processDiscardQueue();
+      }
+    }
+
+    function processDiscardQueue() {
+      if (state.discardQueue.length === 0) {
+        state.pendingAction = { type: "robber" };
+        log(`Select a hex to move the robber.`);
+        render();
+        return;
+      }
+      const next = state.discardQueue[0];
+      const p = state.players[next.pid];
+      if (p.isAI) {
+        let remaining = next.count;
+        while (remaining > 0) {
+          const avail = RES.filter(r => p.resources[r] > 0);
+          const rr = avail[Math.floor(Math.random() * avail.length)];
+          p.resources[rr]--;
+          state.bank[rr]++;
+          remaining--;
         }
-      });
+        log(`${p.name} (AI) discarded ${next.count} cards.`);
+        state.discardQueue.shift();
+        processDiscardQueue();
+      } else {
+        state.pendingAction = { type: "discard", pid: next.pid, count: next.count };
+        log(`${p.name}: discard ${next.count} cards.`);
+        render();
+      }
     }
 
     function rollDice() {
@@ -629,8 +692,10 @@
       log(`${currentPlayer().name} rolled ${total}.`);
       if (total === 7) {
         maybeDiscardOnSeven();
-        state.pendingAction = { type: "robber" };
-        log(`Select a hex to move the robber.`);
+        if (state.discardQueue.length === 0) {
+            state.pendingAction = { type: "robber" };
+            log(`Select a hex to move the robber.`);
+        }
       } else distributeResources(total);
       render();
     }
@@ -647,9 +712,15 @@
     }
 
     function updateLargestArmy() {
-      let best = null;
+      const currentOwner = state.largestArmyOwner;
+      let best = currentOwner;
+      let bestCount = currentOwner !== null ? state.players[currentOwner].knightsPlayed : 2;
+
       state.players.forEach(p => {
-        if (p.knightsPlayed >= 3 && (best === null || p.knightsPlayed > state.players[best].knightsPlayed)) best = p.id;
+        if (p.knightsPlayed > bestCount) {
+          bestCount = p.knightsPlayed;
+          best = p.id;
+        }
       });
       state.largestArmyOwner = best;
     }
@@ -684,11 +755,16 @@
     }
 
     function updateLongestRoad() {
-      let owner = null;
-      let best = 4;
+      const currentOwner = state.longestRoadOwner;
+      let owner = currentOwner;
+      let best = currentOwner !== null ? computeLongestPath(currentOwner) : 4;
+
       state.players.forEach(p => {
         const len = computeLongestPath(p.id);
-        if (len > best) { best = len; owner = p.id; }
+        if (len > best) {
+          best = len;
+          owner = p.id;
+        }
       });
       state.longestRoadOwner = owner;
     }
@@ -723,6 +799,59 @@
 
     function eligibleCitySpots(pid) {
       return state.intersections.filter(i => i.owner === pid && i.type === "settlement").map(i => i.id);
+    }
+
+    function saveGame() {
+      try {
+        const data = JSON.stringify(state, (key, value) => {
+          if (key === 'svg') return undefined; // Cannot serialize DOM element
+          return value;
+        });
+        localStorage.setItem("catan_save", data);
+      } catch (e) {
+        console.error("Failed to save game", e);
+      }
+    }
+
+    function loadGame() {
+      const data = localStorage.getItem("catan_save");
+      if (!data) return false;
+      try {
+        const saved = JSON.parse(data);
+        Object.assign(state, saved);
+        state.svg = el("boardSvg");
+        // Re-calculate derived values or fix object references if needed
+        render();
+        return true;
+      } catch (e) {
+        console.error("Failed to load game", e);
+        return false;
+      }
+    }
+
+    function showModal(title, bodyHtml, primaryLabel = "OK", secondaryLabel = null, primaryAction = null, secondaryAction = null) {
+      el("modalTitle").textContent = title;
+      el("modalBody").innerHTML = bodyHtml;
+      const primaryBtn = el("closeModal");
+      primaryBtn.textContent = primaryLabel;
+      primaryBtn.onclick = () => {
+        if (primaryAction) primaryAction();
+        el("modal").classList.remove("open");
+      };
+
+      const secondaryBtn = el("modalSecondaryBtn");
+      if (secondaryLabel) {
+        secondaryBtn.style.display = "inline-block";
+        secondaryBtn.textContent = secondaryLabel;
+        secondaryBtn.onclick = () => {
+          if (secondaryAction) secondaryAction();
+          el("modal").classList.remove("open");
+        };
+      } else {
+        secondaryBtn.style.display = "none";
+      }
+
+      el("modal").classList.add("open");
     }
 
     function renderBoard() {
@@ -825,22 +954,32 @@
       const activeCity = state.pendingAction?.type === "city" ? eligibleCitySpots(state.current) : [];
 
       state.intersections.forEach(i => {
-        const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        c.setAttribute("cx", i.x);
-        c.setAttribute("cy", i.y);
-        c.setAttribute("r", i.owner === null ? (activeSet.includes(i.id) ? 8 : 5) : (i.type === "city" ? 12 : 9));
+        let node;
+        if (i.type === "city") {
+          node = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          node.setAttribute("x", i.x - 12);
+          node.setAttribute("y", i.y - 12);
+          node.setAttribute("width", 24);
+          node.setAttribute("height", 24);
+          node.setAttribute("rx", 4);
+        } else {
+          node = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          node.setAttribute("cx", i.x);
+          node.setAttribute("cy", i.y);
+          node.setAttribute("r", i.owner === null ? (activeSet.includes(i.id) ? 8 : 5) : 9);
+        }
 
         let fill = "#dbe4ea";
         if (i.owner !== null) fill = state.players[i.owner].color;
         else if (activeSet.includes(i.id)) fill = "#ffd166";
         if (activeCity.includes(i.id)) fill = "#ffe66d";
 
-        c.setAttribute("fill", fill);
-        c.setAttribute("stroke", "rgba(0,0,0,.4)");
-        c.setAttribute("stroke-width", "2");
-        c.style.cursor = (activeSet.includes(i.id) || activeCity.includes(i.id)) ? "pointer" : "default";
+        node.setAttribute("fill", fill);
+        node.setAttribute("stroke", "rgba(0,0,0,.4)");
+        node.setAttribute("stroke-width", "2");
+        node.style.cursor = (activeSet.includes(i.id) || activeCity.includes(i.id)) ? "pointer" : "default";
 
-        c.addEventListener("click", () => {
+        node.addEventListener("click", () => {
           if (state.pendingAction?.type === "settlement" && activeSet.includes(i.id)) {
             const free = state.pendingAction.free;
             if (placeSettlement(state.current, i.id, free)) {
@@ -861,7 +1000,7 @@
             }
           }
         });
-        svg.appendChild(c);
+        svg.appendChild(node);
 
         if (state.pendingAction?.type === "setup-road") {
           const edgeChoices = state.edges.filter(e => setupCanPlaceRoad(state.current, e.id, state.pendingAction.fromInt));
@@ -888,7 +1027,7 @@
     }
 
     function fillSelectors() {
-      const makeResOptions = () => RES.map(r => `<option value="${r}">${r}</option>`).join("");
+      const makeResOptions = () => RES.map(r => `<option value="${r}">${RES_ICONS[r]} ${r}</option>`).join("");
       ["tradeGive","tradeGet","offerGive","offerWant"].forEach(id => el(id).innerHTML = makeResOptions());
       const to = el("offerTo");
       to.innerHTML = state.players.map((p,i)=>`<option value="${i}">${p.name}</option>`).join("");
@@ -906,6 +1045,8 @@
       if (t === "city") return "Choose your settlement to upgrade.";
       if (t === "robber") return "Select a hex for robber movement.";
       if (t === "setup-road") return "Setup: place adjacent road.";
+      if (t === "steal") return "Select an adjacent player to steal from.";
+      if (t === "discard") return "Discard resources.";
       return `Action: ${t}`;
     }
 
@@ -931,6 +1072,25 @@
     }
 
     function renderPanels() {
+      // Apply specialized styling for discard modal if active
+      if (state.pendingAction?.type === "discard") {
+        const p = state.players[state.pendingAction.pid];
+        const count = state.pendingAction.count;
+        const resList = RES.map(r => `
+          <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.05); padding:8px; border-radius:8px;">
+            <span>${RES_ICONS[r]} ${r}: ${p.resources[r]}</span>
+            <button onclick="doDiscard('${r}')" ${p.resources[r] > 0 ? '' : 'disabled'}>Discard 1</button>
+          </div>
+        `).join("");
+
+        showModal(
+          `${p.name}: Discard ${count} more cards`,
+          `<div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">${resList}</div>`,
+          "OK"
+        );
+        el("closeModal").style.display = "none"; // Hide OK button until done
+      }
+
       el("phasePill").textContent = state.phase === "setup" ? `Setup ${state.setupStep+1}/${state.setupOrder.length}` : `Main - Round ${state.turn}`;
       el("turnPill").textContent = `Turn: ${currentPlayer().name}`;
       el("actionHint").textContent = actionHintText();
@@ -942,19 +1102,38 @@
         const vp = countVP(i);
         const div = document.createElement("div");
         div.className = `player ${i===state.current?"active":""}`;
+        if (state.pendingAction?.type === "steal" && state.pendingAction.victims.includes(i)) {
+          div.classList.add("eligible-victim");
+          div.style.cursor = "pointer";
+          div.addEventListener("click", () => {
+            stealFrom(i);
+            state.pendingAction = null;
+            render();
+          });
+        }
         div.style.borderLeftColor = p.color;
+
+        let badges = "";
+        if (state.largestArmyOwner === i) badges += `<span title="Largest Army" style="cursor:help;">🎖️</span>`;
+        if (state.longestRoadOwner === i) badges += `<span title="Longest Road" style="cursor:help;">🛤️</span>`;
+
+        const isCurrent = (i === state.current);
+        const devDisplay = isCurrent
+          ? (p.dev.map(c => c.type).join(", ") || "none")
+          : (p.dev.length > 0 ? `${p.dev.length} cards` : "none");
+
         div.innerHTML = `
           <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
-            <strong>${p.name}${p.isAI ? ` (${p.aiLevel === "ai-normal" ? "AI Normal" : "AI Easy"})` : ""}</strong><span class="pill">VP: ${vp}</span>
+            <strong>${p.name}${p.isAI ? ` (${p.aiLevel === "ai-normal" ? "AI Normal" : "AI Easy"})` : ""} ${badges}</strong><span class="pill">VP: ${vp - p.vpCards} (+?)</span>
           </div>
           <div style="margin-top:4px; font-size:12px; color:var(--muted)">
             Roads ${15-p.roads}/15 · Settlements ${5-p.settlements}/5 · Cities ${4-p.cities}/4 · Cards ${totalCards}
           </div>
           <div style="margin-top:4px; font-size:12px; color:var(--muted)">
-            Dev: ${p.dev.map(c => c.type).join(", ") || "none"} · Knights played: ${p.knightsPlayed}
+            Dev: ${devDisplay} · Knights played: ${p.knightsPlayed}
           </div>
           <div class="resources">
-            ${RES.map(r=>`<div class="resource">${r}: ${p.resources[r]}</div>`).join("")}
+            ${RES.map(r=>`<div class="resource">${RES_ICONS[r]} ${p.resources[r]}</div>`).join("")}
           </div>
         `;
         panel.appendChild(div);
@@ -962,22 +1141,23 @@
 
       const isMain = state.phase === "main";
       const p = currentPlayer();
-      const hasPlayable = (name) => p.dev.some(c => c.type === name && isDevPlayable(c, p.id));
+      const hasPlayable = (name) => !state.devCardPlayedThisTurn && p.dev.some(c => c.type === name && isDevPlayable(c, p.id));
       el("rollBtn").disabled = !isMain || state.diceRolled || state.aiThinking;
       el("endTurnBtn").disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking;
       ["buildRoadBtn","buildSettlementBtn","buildCityBtn","buyDevBtn","bankTradeBtn","playerTradeBtn"].forEach(id => {
         el(id).disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking;
       });
-      el("playKnightBtn").disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking || !hasPlayable("Knight");
-      el("playRoadBuildBtn").disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking || !hasPlayable("Road Building");
-      el("playYearBtn").disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking || !hasPlayable("Year of Plenty");
-      el("playMonoBtn").disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking || !hasPlayable("Monopoly");
+      el("playKnightBtn").disabled = !isMain || state.pendingAction !== null || state.aiThinking || !hasPlayable("Knight");
+      el("playRoadBuildBtn").disabled = !isMain || state.pendingAction !== null || state.aiThinking || !hasPlayable("Road Building");
+      el("playYearBtn").disabled = !isMain || state.pendingAction !== null || state.aiThinking || !hasPlayable("Year of Plenty");
+      el("playMonoBtn").disabled = !isMain || state.pendingAction !== null || state.aiThinking || !hasPlayable("Monopoly");
       el("cancelActionBtn").disabled = !(state.phase === "main" && state.pendingAction && state.pendingAction.type !== "robber");
     }
 
     function render() {
       renderBoard();
       renderPanels();
+      saveGame();
     }
 
     function finishSetupPlacement(secondSettlementIntId) {
@@ -1031,6 +1211,7 @@
       log(`${currentPlayer().name}: place your first settlement.`);
       fillSelectors();
       render();
+      el("closeModal").click();
       maybeRunAiTurn();
     }
 
@@ -1039,10 +1220,28 @@
       state.current = (state.current + 1) % state.players.length;
       if (state.current === 0) state.turn++;
       state.diceRolled = false;
+      state.devCardPlayedThisTurn = false;
       el("diceResult").textContent = "Dice: —";
       log(`Turn passes to ${currentPlayer().name}.`);
       render();
       maybeRunAiTurn();
+    }
+
+    function doDiscard(res) {
+      if (state.pendingAction?.type !== "discard") return;
+      const p = state.players[state.pendingAction.pid];
+      if (p.resources[res] > 0) {
+        p.resources[res]--;
+        state.bank[res]++;
+        state.pendingAction.count--;
+        if (state.pendingAction.count <= 0) {
+          el("modal").classList.remove("open");
+          state.discardQueue.shift();
+          processDiscardQueue();
+        } else {
+          render();
+        }
+      }
     }
 
     function chooseResource(promptText) {
@@ -1069,11 +1268,67 @@
       render();
     }
 
+    function startYearOfPlenty() {
+      state.pendingAction = { type: "year-of-plenty", remaining: 2 };
+      const body = `
+        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px;">
+          ${RES.map(r => `<button onclick="doYearOfPlenty('${r}')">${RES_ICONS[r]} ${r}</button>`).join("")}
+        </div>
+        <div id="yopCount" style="margin-top:10px; font-weight:bold;">Remaining: 2</div>
+      `;
+      showModal("Year of Plenty: Pick 2 Resources", body, "OK");
+      el("closeModal").style.display = "none";
+    }
+
+    function doYearOfPlenty(res) {
+      if (state.pendingAction?.type !== "year-of-plenty") return;
+      const p = currentPlayer();
+      giveResource(p, res, 1);
+      state.pendingAction.remaining--;
+      if (state.pendingAction.remaining <= 0) {
+        log(`${p.name} used Year of Plenty.`);
+        state.pendingAction = null;
+        el("modal").classList.remove("open");
+        render();
+      } else {
+        el("yopCount").textContent = `Remaining: ${state.pendingAction.remaining}`;
+      }
+    }
+
+    function startMonopoly() {
+      state.pendingAction = { type: "monopoly" };
+      const body = `
+        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px;">
+          ${RES.map(r => `<button onclick="doMonopoly('${r}')">${RES_ICONS[r]} ${r}</button>`).join("")}
+        </div>
+      `;
+      showModal("Monopoly: Pick a Resource", body, "OK");
+      el("closeModal").style.display = "none";
+    }
+
+    function doMonopoly(res) {
+      if (state.pendingAction?.type !== "monopoly") return;
+      const p = currentPlayer();
+      let gain = 0;
+      state.players.forEach(op => {
+        if (op.id === p.id) return;
+        gain += op.resources[res];
+        op.resources[res] = 0;
+      });
+      p.resources[res] += gain;
+      log(`${p.name} played Monopoly on ${res} and took ${gain}.`);
+      state.pendingAction = null;
+      el("modal").classList.remove("open");
+      render();
+    }
+
     function playDev(cardName) {
       const p = currentPlayer();
+      if (state.devCardPlayedThisTurn) return alert("Already played a dev card this turn.");
       const idx = p.dev.findIndex(c => c.type === cardName && isDevPlayable(c, p.id));
       if (idx < 0) return alert(`No ${cardName} card available.`);
       p.dev.splice(idx, 1);
+      state.devCardPlayedThisTurn = true;
 
       if (cardName === "Knight") {
         p.knightsPlayed++;
@@ -1084,22 +1339,9 @@
         state.pendingAction = { type: "road", remaining: 2, free: true };
         log(`${p.name} played Road Building. Place 2 free roads.`);
       } else if (cardName === "Year of Plenty") {
-        const r1 = chooseResource("Year of Plenty: first resource");
-        const r2 = chooseResource("Year of Plenty: second resource");
-        if (!r1 || !r2) return alert("Canceled or invalid resource.");
-        giveResource(p, r1, 1); giveResource(p, r2, 1);
-        log(`${p.name} gained ${r1} and ${r2} with Year of Plenty.`);
+        startYearOfPlenty();
       } else if (cardName === "Monopoly") {
-        const r = chooseResource("Monopoly: choose resource");
-        if (!r) return alert("Canceled or invalid resource.");
-        let gain = 0;
-        state.players.forEach(op => {
-          if (op.id === p.id) return;
-          gain += op.resources[r];
-          op.resources[r] = 0;
-        });
-        p.resources[r] += gain;
-        log(`${p.name} played Monopoly on ${r} and took ${gain}.`);
+        startMonopoly();
       }
       checkWin();
       render();
@@ -1118,7 +1360,7 @@
       render();
     }
 
-    function doPlayerTrade() {
+    function startPlayerTrade() {
       const p = currentPlayer();
       const to = Number(el("offerTo").value);
       const give = el("offerGive").value;
@@ -1126,23 +1368,49 @@
       if (to === p.id) return alert("Choose another player.");
       if (give === want) return alert("Use different resources.");
       if (p.resources[give] < 1) return alert("You do not have offered resource.");
+
       const op = state.players[to];
-      const accepted = confirm(`${op.name}, accept trade?\nGive 1 ${want} and receive 1 ${give}.`);
-      if (!accepted) return;
-      if (op.resources[want] < 1) return alert(`${op.name} lacks ${want}.`);
+      const body = `
+        <p>${p.name} offers 1 ${RES_ICONS[give]} for 1 ${RES_ICONS[want]}</p>
+        <div style="display:flex; gap:10px; margin-top:10px;">
+          <button class="primary" onclick="acceptPlayerTrade(${p.id}, ${op.id}, '${give}', '${want}')">Accept</button>
+          <button class="warn" onclick="cancelModal()">Reject</button>
+        </div>
+      `;
+      showModal(`Trade Offer for ${op.name}`, body, "Cancel");
+      el("closeModal").style.display = "none";
+    }
+
+    function acceptPlayerTrade(fromId, toId, give, want) {
+      const p = state.players[fromId];
+      const op = state.players[toId];
+      if (op.resources[want] < 1) {
+        alert(`${op.name} lacks ${want}.`);
+        cancelModal();
+        return;
+      }
       p.resources[give]--; op.resources[give]++;
       op.resources[want]--; p.resources[want]++;
       log(`${p.name} traded 1 ${give} for 1 ${want} with ${op.name}.`);
+      cancelModal();
       render();
+    }
+
+    function cancelModal() {
+      el("modal").classList.remove("open");
+      state.pendingAction = null;
+      render();
+    }
+
+    function doPlayerTrade() {
+      startPlayerTrade();
     }
 
     function checkWin() {
       const p = currentPlayer();
       const vp = countVP(p.id);
       if (vp >= 10) {
-        const box = el("winnerBox");
-        box.innerHTML = `<div class="winner">${p.name} wins with ${vp} VP!</div>`;
-        el("modal").classList.add("open");
+        showModal("Game Over!", `<div class="winner">${p.name} wins with ${vp} VP!</div>`, "New Game", "Close", () => startGame());
         log(`${p.name} wins the game with ${vp} VP!`);
       }
     }
@@ -1191,6 +1459,29 @@
       const maxBuildLoops = level === "ai-normal" ? 4 : 2;
       for (let i = 0; i < maxBuildLoops; i++) {
         let acted = false;
+
+        // AI Bank Trade logic
+        RES.forEach(rGive => {
+          if (p.resources[rGive] >= 4) {
+            // Find what we need
+            const needs = [];
+            if (p.settlements > 0 && p.resources.brick < 1) needs.push('brick');
+            if (p.settlements > 0 && p.resources.lumber < 1) needs.push('lumber');
+            if (p.settlements > 0 && p.resources.wool < 1) needs.push('wool');
+            if (p.settlements > 0 && p.resources.grain < 1) needs.push('grain');
+            if (p.cities > 0 && p.resources.ore < 3) needs.push('ore');
+
+            if (needs.length > 0) {
+              const rGet = needs[0];
+              if (state.bank[rGet] > 0) {
+                p.resources[rGive] -= 4; state.bank[rGive] += 4;
+                p.resources[rGet] += 1; state.bank[rGet] -= 1;
+                log(`${p.name} (AI) bank traded 4 ${rGive} for 1 ${rGet}.`);
+                acted = true;
+              }
+            }
+          }
+        });
 
         const citySpots = eligibleCitySpots(pid);
         if (citySpots.length && canAfford(p, COST.city)) {
@@ -1246,13 +1537,68 @@
 
     function maybeRunAiTurn() {
       const p = currentPlayer();
-      if (state.phase !== "main" || !p?.isAI || state.aiThinking) return;
-      setTimeout(() => runAiTurn(p.id), 150);
+      if (!p?.isAI || state.aiThinking) return;
+      if (state.phase === "main") {
+        setTimeout(() => runAiTurn(p.id), 150);
+      } else if (state.phase === "setup") {
+        setTimeout(() => runAiSetupPlacement(p.id), 150);
+      }
+    }
+
+    async function runAiSetupPlacement(pid) {
+      if (state.current !== pid || state.phase !== "setup") return;
+      state.aiThinking = true;
+      render();
+      await sleep(500);
+
+      if (state.pendingAction?.type === "settlement") {
+        const spots = eligibleSettlementSpots(pid);
+        // Score spots by adjacent token values
+        let bestSpot = spots[0];
+        let bestScore = -1;
+        spots.forEach(sid => {
+          const i = state.intersections[sid];
+          let score = 0;
+          i.adjHex.forEach(hid => {
+            const h = state.hexes[hid];
+            if (h.token) {
+              const pips = {2:1,3:2,4:3,5:4,6:5,8:5,9:4,10:3,11:2,12:1}[h.token] || 0;
+              score += pips;
+            }
+          });
+          if (score > bestScore) {
+            bestScore = score;
+            bestSpot = sid;
+          }
+        });
+
+        if (placeSettlement(pid, bestSpot, true)) {
+          log(`${currentPlayer().name} (AI) built setup settlement.`);
+          state.pendingAction = { type: "setup-road", fromInt: bestSpot };
+          render();
+          await sleep(500);
+
+          const edgeChoices = state.edges.filter(e => setupCanPlaceRoad(pid, e.id, bestSpot));
+          const edge = edgeChoices[Math.floor(Math.random() * edgeChoices.length)];
+          if (placeRoad(pid, edge.id, true)) {
+            log(`${currentPlayer().name} (AI) placed setup road.`);
+            state.aiThinking = false;
+            finishSetupPlacement(bestSpot);
+            render();
+          }
+        }
+      }
     }
 
     function bind() {
       el("playerCount").addEventListener("change", updatePlayerTypeControls);
-      el("newGameBtn").addEventListener("click", startGame);
+      el("newGameBtn").addEventListener("click", () => {
+        if (state.phase === "main") {
+          showModal("New Game?", "Are you sure you want to restart? Current progress will be lost.", "Yes, Restart", "No, Continue", () => startGame());
+        } else {
+          startGame();
+        }
+      });
       el("rollBtn").addEventListener("click", rollDice);
       el("endTurnBtn").addEventListener("click", endTurn);
       el("cancelActionBtn").addEventListener("click", () => {
@@ -1297,8 +1643,12 @@
       state.svg = el("boardSvg");
       bind();
       updatePlayerTypeControls();
-      el("modal").classList.add("open");
-      startGame();
+      if (!loadGame()) {
+        el("modal").classList.add("open");
+        startGame();
+      } else {
+        log("Welcome back! Game loaded from local storage.");
+      }
     }
 
     init();
