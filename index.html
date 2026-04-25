@@ -99,6 +99,13 @@
     .pill.phase { background: rgba(232,184,64,.15); border-color: rgba(232,184,64,.4); color: var(--gold); }
     .pill.turn { background: rgba(93,184,108,.12); border-color: rgba(93,184,108,.35); color: #8de89a; }
     .pill.status { background: rgba(255,255,255,.07); }
+    .header-tools { display: flex; gap: 8px; align-items: center; }
+    .mini-btn {
+      padding: 5px 9px;
+      font-size: 11px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.08);
+    }
 
     /* ── BOARD AREA ── */
     .board-area {
@@ -528,6 +535,41 @@
 
     /* ── LEGEND ── */
     .legend { font-size: 11px; color: var(--ink-muted); line-height: 1.5; margin-top: 4px; }
+    .quick-stats {
+      background: rgba(0,0,0,.24);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .stat-box {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 8px;
+      padding: 7px 8px;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .stat-box strong { color: var(--gold); }
+    .bank-rack {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .bank-chip {
+      text-align: center;
+      background: rgba(255,255,255,.06);
+      border-radius: 6px;
+      padding: 4px 2px;
+      font-size: 11px;
+      font-weight: 700;
+    }
 
     /* ── RESPONSIVE ── */
     @media (max-width: 1100px) {
@@ -539,6 +581,9 @@
     @media (max-width: 600px) {
       .app-title h1 { font-size: 17px; }
       .board-area { height: 65vw; }
+      .header-tools { width: 100%; justify-content: flex-end; }
+      .stats-grid { grid-template-columns: 1fr; }
+      .bank-rack { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
 
     /* ── SVG BOARD CLASSES ── */
@@ -565,6 +610,11 @@
       <span id="aiThinkingBadge" style="display:none;" class="ai-thinking-badge">
         <span class="ai-dot"></span> AI thinking…
       </span>
+    </div>
+    <div class="header-tools">
+      <button id="saveNowBtn" class="mini-btn">💾 Save</button>
+      <button id="clearSaveBtn" class="mini-btn">🧹 Reset Save</button>
+      <button id="helpBtn" class="mini-btn">❔ Help</button>
     </div>
   </header>
 
@@ -620,6 +670,12 @@
       <!-- Action Hint -->
       <div id="actionHint" class="action-hint inactive">No pending action</div>
       <div style="text-align:right"><button id="cancelActionBtn" style="font-size:11px; padding:4px 8px;">✕ Cancel</button></div>
+
+      <!-- Round Summary -->
+      <div>
+        <div class="section-title">Round Summary</div>
+        <div id="quickStats" class="quick-stats"></div>
+      </div>
 
       <!-- Build -->
       <div>
@@ -754,6 +810,7 @@
     city:       { grain:2, ore:3 },
     dev:        { wool:1, grain:1, ore:1 }
   };
+  const SAVE_KEY = "catan_save_v3";
 
   const state = {
     svg: null,
@@ -1224,11 +1281,11 @@
   ═══════════════════════════════════════════════════ */
   function saveGame(){
     try{
-      localStorage.setItem("catan_save_v2",JSON.stringify(state,(k,v)=>k==="svg"?undefined:v));
+      localStorage.setItem(SAVE_KEY,JSON.stringify(state,(k,v)=>k==="svg"?undefined:v));
     }catch(e){}
   }
   function loadGame(){
-    const d=localStorage.getItem("catan_save_v2");
+    const d=localStorage.getItem(SAVE_KEY) || localStorage.getItem("catan_save_v2");
     if(!d)return false;
     try{
       const saved=JSON.parse(d);
@@ -1237,6 +1294,10 @@
       if(!state.intersections?.some(i=>i.port))assignPorts();
       render();return true;
     }catch(e){return false;}
+  }
+  function clearSavedGame(){
+    localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem("catan_save_v2");
   }
 
   /* ═══════════════════════════════════════════════════
@@ -1749,6 +1810,7 @@
     $("playMonoBtn").disabled=!isMain||state.pendingAction!==null||state.aiThinking||!hasPlayable("Monopoly");
     $("cancelActionBtn").disabled=!(state.phase==="main"&&state.pendingAction&&state.pendingAction.type!=="robber");
     $("devCardSection").style.display=p.dev.length?"block":"none";
+    renderQuickStats();
   }
 
   function actionHintText(){
@@ -1767,6 +1829,37 @@
     if(t==="year-of-plenty")return `🌟 Choose ${state.pendingAction.remaining} resource(s)`;
     if(t==="monopoly")return "💸 Choose a resource to claim";
     return `Action: ${t}`;
+  }
+
+  function openHelp(){
+    showModal(
+      "How to Play This Build",
+      `<div style="display:grid;gap:10px;color:var(--ink-muted);line-height:1.5;">
+        <p><strong style="color:var(--gold)">Goal:</strong> Reach <strong>10 VP</strong> through settlements, cities, and achievements.</p>
+        <p><strong style="color:var(--gold)">Turn flow:</strong> Roll dice → collect resources → build/trade/play dev card → end turn.</p>
+        <p><strong style="color:var(--gold)">Hotkeys:</strong> <kbd>R</kbd> roll, <kbd>E</kbd> end turn, <kbd>Esc</kbd> close/cancel, <kbd>?</kbd> help.</p>
+        <p><strong style="color:var(--gold)">Save system:</strong> Autosave happens every render. Use <em>Save</em> for manual checkpoint and <em>Reset Save</em> to clear local progress.</p>
+      </div>`,
+      "Got it"
+    );
+  }
+
+  function renderQuickStats(){
+    const p=currentPlayer();
+    const longest=state.longestRoadOwner!==null ? state.players[state.longestRoadOwner].name : "Unclaimed";
+    const army=state.largestArmyOwner!==null ? state.players[state.largestArmyOwner].name : "Unclaimed";
+    const bankChips=RES.map(r=>`<div class="bank-chip">${RES_ICONS[r]} ${state.bank[r]}</div>`).join("");
+    $("quickStats").innerHTML=`
+      <div class="stats-grid">
+        <div class="stat-box"><strong>Current VP:</strong> ${countVP(p.id)} / 10</div>
+        <div class="stat-box"><strong>Round:</strong> ${state.turn} · <strong>Player:</strong> ${p.name}</div>
+        <div class="stat-box"><strong>Dev Deck:</strong> ${state.devDeck.length} cards left</div>
+        <div class="stat-box"><strong>Last Roll:</strong> ${state.lastRoll ?? "—"}</div>
+        <div class="stat-box"><strong>Longest Road:</strong> ${longest}</div>
+        <div class="stat-box"><strong>Largest Army:</strong> ${army}</div>
+      </div>
+      <div class="bank-rack">${bankChips}</div>
+    `;
   }
 
   function renderNow(){ renderBoard(); renderPanels(); saveGame(); }
@@ -2208,6 +2301,19 @@
 
     $("playerCount").addEventListener("change",updatePlayerTypeControls);
     $("tradeGive").addEventListener("change",render);
+    $("saveNowBtn").addEventListener("click",()=>{
+      saveGame();
+      toast("💾 Game saved.");
+    });
+    $("clearSaveBtn").addEventListener("click",()=>{
+      showModal(
+        "Reset Saved Game?",
+        "<p style='color:var(--ink-muted)'>This clears browser save data for this game.</p>",
+        "Clear Save","Cancel",
+        ()=>{ clearSavedGame(); toast("🧹 Saved game removed."); }
+      );
+    });
+    $("helpBtn").addEventListener("click",openHelp);
 
     $("newGameBtn").addEventListener("click",()=>{
       if(state.phase==="main"){
@@ -2256,6 +2362,7 @@
       const k=e.key.toLowerCase();
       if(k==="r")$("rollBtn").click();
       if(k==="e")$("endTurnBtn").click();
+      if((k==="/"&&e.shiftKey)||k==="?"){ e.preventDefault(); openHelp(); }
       if(e.key==="Escape"){
         if($("passOverlay").classList.contains("open"))$("passOverlay").classList.remove("open");
         else if($("modal").classList.contains("open"))$("modal").classList.remove("open");
