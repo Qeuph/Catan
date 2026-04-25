@@ -3,258 +3,591 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Catan (Single-File Web Version)</title>
+  <title>Catan</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,400&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #102029;
-      --panel: #1b2f3a;
-      --panel-2: #243f4d;
-      --ink: #e9f3f8;
-      --muted: #b3c5cf;
-      --accent: #f0b429;
-      --danger: #ec6f66;
-      --ok: #7bd389;
-      --road: #5d4037;
-      --settlement: #f6f1e1;
-      --city: #c9d6df;
-      --hex-stroke: rgba(0,0,0,.25);
-      --disabled: #6f7f87;
+      --ocean: #0d2137;
+      --ocean-mid: #123352;
+      --panel-bg: #1a1005;
+      --panel-wood: #231508;
+      --panel-border: rgba(180,130,60,.35);
+      --parchment: #f5e9c8;
+      --ink: #f0e6d0;
+      --ink-muted: #a08060;
+      --gold: #e8b840;
+      --gold-dim: #8a6820;
+      --red-pip: #c02020;
+      --ok: #5db86c;
+      --warn: #e06040;
+      --accent: #e8b840;
+      --shadow: rgba(0,0,0,.65);
+      --p0: #e05030;
+      --p1: #2090a0;
+      --p2: #d8c030;
+      --p3: #9050d0;
     }
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      margin: 0;
-      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      background: radial-gradient(circle at top, #1d3440, #0f1d25 70%);
+      font-family: 'Crimson Pro', Georgia, serif;
+      background: var(--ocean);
+      background-image:
+        radial-gradient(ellipse at 30% 20%, rgba(20,60,100,.8) 0%, transparent 60%),
+        radial-gradient(ellipse at 70% 80%, rgba(10,30,60,.9) 0%, transparent 60%);
       color: var(--ink);
       min-height: 100vh;
+      overflow-x: hidden;
     }
-    h1,h2,h3,p { margin: 0; }
-    .wrap {
+
+    /* ── LAYOUT ── */
+    .app {
       display: grid;
-      grid-template-columns: minmax(640px, 1fr) 370px;
-      gap: 16px;
-      padding: 16px;
-      max-width: 1500px;
+      grid-template-columns: 1fr 380px;
+      grid-template-rows: auto 1fr;
+      gap: 0;
+      height: 100vh;
+      max-width: 1600px;
       margin: 0 auto;
     }
-    .board-panel, .side {
-      background: rgba(20, 40, 50, .75);
-      border: 1px solid rgba(255,255,255,.1);
-      border-radius: 12px;
-      backdrop-filter: blur(4px);
-      overflow: hidden;
-    }
-    .board-header {
-      padding: 12px 14px;
-      border-bottom: 1px solid rgba(255,255,255,.1);
+    .app-header {
+      grid-column: 1 / -1;
       display: flex;
+      align-items: center;
       justify-content: space-between;
+      padding: 8px 16px;
+      background: rgba(0,0,0,.4);
+      border-bottom: 1px solid var(--panel-border);
+      gap: 12px;
+    }
+    .app-title {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .app-title h1 {
+      font-family: 'Cinzel', serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--gold);
+      letter-spacing: .08em;
+      text-shadow: 0 2px 8px rgba(0,0,0,.6);
+    }
+    .app-title span {
+      font-size: 13px;
+      color: var(--ink-muted);
+    }
+    .header-pills {
+      display: flex;
       gap: 8px;
       align-items: center;
-      background: rgba(0,0,0,.18);
+      flex-wrap: wrap;
     }
-    .board-header .title {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
+    .pill {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-family: 'Crimson Pro', sans-serif;
+      font-weight: 600;
+      background: rgba(255,255,255,.1);
+      border: 1px solid rgba(255,255,255,.15);
+      color: var(--ink);
+      white-space: nowrap;
     }
-    .board-header small { color: var(--muted); }
+    .pill.phase { background: rgba(232,184,64,.15); border-color: rgba(232,184,64,.4); color: var(--gold); }
+    .pill.turn { background: rgba(93,184,108,.12); border-color: rgba(93,184,108,.35); color: #8de89a; }
+    .pill.status { background: rgba(255,255,255,.07); }
+
+    /* ── BOARD AREA ── */
+    .board-area {
+      position: relative;
+      overflow: hidden;
+      background: radial-gradient(circle at 50% 50%, #194060 0%, #0d2137 70%);
+    }
     #boardSvg {
       display: block;
       width: 100%;
-      height: calc(100vh - 150px);
-      min-height: 620px;
-      background: radial-gradient(circle at center, rgba(71,123,146,.4), rgba(29,58,72,.5));
+      height: 100%;
     }
+
+    /* ── SIDE PANEL ── */
     .side {
       display: flex;
       flex-direction: column;
-      max-height: calc(100vh - 32px);
+      background: var(--panel-bg);
+      border-left: 1px solid var(--panel-border);
+      overflow: hidden;
     }
-    .section {
-      border-bottom: 1px solid rgba(255,255,255,.08);
-      padding: 12px;
-      background: linear-gradient(180deg, rgba(255,255,255,.03), transparent);
+
+    /* ── TABS ── */
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      background: rgba(0,0,0,.35);
+      border-bottom: 1px solid var(--panel-border);
+      flex-shrink: 0;
     }
-    .section:last-child { border-bottom: none; }
-    .row {
+    .tab-btn {
+      padding: 9px 4px;
+      border: none;
+      background: none;
+      color: var(--ink-muted);
+      font-family: 'Cinzel', serif;
+      font-size: 11px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color .15s, border-color .15s;
+      letter-spacing: .04em;
+    }
+    .tab-btn:hover { color: var(--ink); }
+    .tab-btn.active { color: var(--gold); border-bottom-color: var(--gold); }
+    .tab-panel { display: none; flex: 1; overflow-y: auto; padding: 12px; flex-direction: column; gap: 10px; }
+    .tab-panel.active { display: flex; }
+
+    /* ── SETUP SECTION (in actions tab) ── */
+    .section-title {
+      font-family: 'Cinzel', serif;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--gold-dim);
+      border-bottom: 1px solid var(--panel-border);
+      padding-bottom: 6px;
+      margin-bottom: 8px;
+    }
+    .setup-row {
       display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
       align-items: center;
-      margin-top: 8px;
+      gap: 8px;
+      flex-wrap: wrap;
     }
-    select,input,button {
-      border: 1px solid rgba(255,255,255,.2);
-      border-radius: 8px;
-      background: var(--panel);
+
+    /* ── CONTROLS ── */
+    select, input {
+      border: 1px solid var(--panel-border);
+      border-radius: 6px;
+      background: rgba(0,0,0,.4);
       color: var(--ink);
-      padding: 8px 10px;
+      padding: 6px 8px;
       font-size: 13px;
+      font-family: 'Crimson Pro', serif;
     }
-    input[type="number"] { width: 70px; }
+    input[type="number"] { width: 62px; }
+    select:focus, input:focus { outline: 1px solid var(--gold); }
+
     button {
       cursor: pointer;
-      background: var(--panel-2);
-      transition: .15s ease;
+      border: 1px solid var(--panel-border);
+      border-radius: 6px;
+      background: rgba(255,255,255,.07);
+      color: var(--ink);
+      padding: 7px 11px;
+      font-family: 'Crimson Pro', serif;
+      font-size: 13px;
+      font-weight: 600;
+      transition: background .15s, transform .1s, box-shadow .15s;
+      white-space: nowrap;
+    }
+    button:hover:not(:disabled) {
+      background: rgba(255,255,255,.14);
+      transform: translateY(-1px);
+      box-shadow: 0 3px 10px rgba(0,0,0,.4);
+    }
+    button:disabled { opacity: .38; cursor: not-allowed; transform: none; }
+    button.primary { background: rgba(44,92,118,.7); border-color: rgba(80,150,190,.5); color: #aaddff; }
+    button.primary:hover:not(:disabled) { background: rgba(44,92,118,.9); }
+    button.gold { background: rgba(140,90,10,.6); border-color: var(--gold-dim); color: var(--gold); }
+    button.gold:hover:not(:disabled) { background: rgba(180,120,20,.7); }
+    button.danger { background: rgba(120,30,20,.6); border-color: rgba(200,80,60,.5); color: #ffa090; }
+
+    /* ── DICE DISPLAY ── */
+    .dice-box {
+      background: rgba(0,0,0,.3);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .dice-pair {
+      display: flex;
+      gap: 6px;
+    }
+    .die-face {
+      width: 38px;
+      height: 38px;
+      border-radius: 7px;
+      background: #f5f0e8;
+      border: 2px solid #c8b890;
+      box-shadow: inset 0 1px 3px rgba(0,0,0,.2), 0 2px 6px rgba(0,0,0,.5);
+      display: grid;
+      place-items: center;
+      transition: transform .05s;
+    }
+    .die-face.rolling { animation: dieRoll .5s ease; }
+    @keyframes dieRoll {
+      0%   { transform: rotate(0deg)  scale(1);    }
+      20%  { transform: rotate(-20deg) scale(1.1); }
+      50%  { transform: rotate(15deg) scale(0.95); }
+      80%  { transform: rotate(-8deg) scale(1.05); }
+      100% { transform: rotate(0deg)  scale(1);    }
+    }
+    .die-svg { width: 26px; height: 26px; }
+    .dice-total {
+      font-family: 'Cinzel', serif;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--gold);
+      min-width: 40px;
+      text-align: center;
+      text-shadow: 0 2px 8px rgba(0,0,0,.5);
+    }
+    .dice-total.seven { color: var(--warn); }
+    .dice-buttons { display: flex; gap: 6px; flex: 1; justify-content: flex-end; }
+
+    /* ── ACTION HINT ── */
+    .action-hint {
+      background: rgba(232,184,64,.1);
+      border: 1px solid rgba(232,184,64,.25);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 13px;
+      color: var(--gold);
+      line-height: 1.4;
+    }
+    .action-hint.inactive { background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.1); color: var(--ink-muted); }
+
+    /* ── BUILD BUTTONS ── */
+    .build-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .build-btn {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      align-items: flex-start;
+      padding: 8px 10px;
+    }
+    .build-btn .btn-label { font-size: 13px; font-weight: 600; }
+    .build-btn .btn-cost { font-size: 10px; color: var(--ink-muted); }
+    .dev-btns { display: flex; flex-direction: column; gap: 5px; }
+    .dev-btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+    /* ── TRADE TAB ── */
+    .trade-group {
+      background: rgba(0,0,0,.2);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .trade-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .trade-rate {
+      font-family: 'Cinzel', serif;
+      font-size: 18px;
+      color: var(--gold);
+      margin: 0 4px;
+    }
+
+    /* ── PLAYERS TAB ── */
+    .player-card {
+      border: 1px solid rgba(255,255,255,.1);
+      border-left: 5px solid #fff;
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: rgba(0,0,0,.2);
+      transition: box-shadow .2s;
+    }
+    .player-card.active {
+      box-shadow: 0 0 0 1px rgba(232,184,64,.5), 0 0 12px rgba(232,184,64,.15);
+      border-left-color: var(--gold) !important;
+    }
+    .player-card.eligible-victim {
+      border: 2px dashed var(--warn) !important;
+      cursor: pointer;
+      animation: victimPulse 1.2s infinite;
+    }
+    @keyframes victimPulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(224,96,64,.4); }
+      50%      { box-shadow: 0 0 0 6px rgba(224,96,64,.0); }
+    }
+    .player-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-bottom: 5px;
+    }
+    .player-name {
+      font-family: 'Cinzel', serif;
+      font-size: 13px;
       font-weight: 600;
     }
-    button:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.1); }
-    button:disabled { background: var(--disabled); cursor: not-allowed; }
-    button.primary { background: #2d5f77; }
-    button.warn { background: #7c3f3f; }
-    .pill {
-      padding: 4px 8px;
-      border-radius: 999px;
-      font-size: 12px;
-      background: rgba(255,255,255,.1);
-    }
-    .players {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 8px;
-      margin-top: 8px;
-      max-height: 260px;
-      overflow: auto;
-    }
-    .player {
-      border: 1px solid rgba(255,255,255,.12);
-      border-left: 6px solid #fff;
-      border-radius: 10px;
-      padding: 8px;
-      background: rgba(0,0,0,.14);
+    .player-vp {
+      font-family: 'Cinzel', serif;
       font-size: 13px;
+      color: var(--gold);
+      font-weight: 700;
     }
-    .player.active { box-shadow: inset 0 0 0 1px rgba(255,255,255,.35); }
-    .player.eligible-victim {
-      border: 2px dashed var(--accent) !important;
-      animation: pulse 1.5s infinite;
+    .vp-bar-wrap {
+      height: 5px;
+      background: rgba(255,255,255,.08);
+      border-radius: 99px;
+      overflow: hidden;
+      margin-bottom: 6px;
     }
-    @keyframes pulse {
-      0% { opacity: 1; }
-      50% { opacity: 0.7; }
-      100% { opacity: 1; }
+    .vp-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #c89820, #e8c840);
+      border-radius: 99px;
+      transition: width .4s ease;
     }
-    .resources {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 6px;
-      margin-top: 6px;
+    .res-rack {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .res-chip {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      background: rgba(255,255,255,.07);
+      border-radius: 5px;
+      padding: 3px 6px;
       font-size: 12px;
+      font-weight: 600;
     }
-    .resource { background: rgba(255,255,255,.07); border-radius: 8px; padding: 4px 6px; }
-    .log {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      max-height: 180px;
-      overflow: auto;
-      background: rgba(0,0,0,.18);
-      border: 1px solid rgba(255,255,255,.08);
-      border-radius: 8px;
-      padding: 8px;
-      line-height: 1.4;
+    .res-chip.highlight { background: rgba(232,184,64,.2); }
+    .player-meta {
+      font-size: 11px;
+      color: var(--ink-muted);
+      margin-top: 4px;
     }
-    .legend {
-      font-size: 12px;
-      color: var(--muted);
-      line-height: 1.4;
-      margin-top: 6px;
+    .badge { display: inline; margin-left: 3px; cursor: help; }
+
+    /* ── LOG TAB ── */
+    .log-box {
+      font-family: 'Crimson Pro', serif;
+      font-size: 13px;
+      flex: 1;
+      overflow-y: auto;
+      line-height: 1.55;
     }
+    .log-entry { padding: 3px 2px; border-bottom: 1px solid rgba(255,255,255,.04); }
+    .log-entry .ts { color: var(--ink-muted); font-size: 11px; margin-right: 4px; }
+    .log-entry.log-res { color: #c0e080; }
+    .log-entry.log-build { color: #80d0ff; }
+    .log-entry.log-robber { color: #ffa080; }
+    .log-entry.log-trade { color: #e8d080; }
+    .log-entry.log-dev { color: #d0a8ff; }
+    .log-entry.log-win { color: var(--gold); font-weight: 700; font-size: 14px; }
+    .log-entry.log-info { color: var(--ink-muted); }
+
+    /* ── MODALS ── */
     .modal {
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,.5);
+      background: rgba(0,0,0,.65);
       display: none;
       align-items: center;
       justify-content: center;
-      z-index: 20;
+      z-index: 50;
+      backdrop-filter: blur(3px);
     }
     .modal.open { display: flex; }
-    .card {
-      width: min(560px, 92vw);
-      max-height: 86vh;
+    .modal-card {
+      width: min(520px, 94vw);
+      max-height: 90vh;
       overflow: auto;
-      background: #1e2f39;
-      border: 1px solid rgba(255,255,255,.2);
-      border-radius: 12px;
-      padding: 16px;
+      background: #1e1206;
+      border: 1px solid var(--panel-border);
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.8);
     }
-    .winner {
-      font-size: 24px;
-      font-weight: bold;
-      color: var(--ok);
-      margin: 12px 0;
-      text-align: center;
+    .modal-card h2 {
+      font-family: 'Cinzel', serif;
+      font-size: 18px;
+      color: var(--gold);
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--panel-border);
     }
-    .modal-content {
-      margin-top: 12px;
-    }
-    .modal-actions {
-      display: flex;
-      gap: 12px;
-      margin-top: 16px;
-      justify-content: flex-end;
-    }
-    .tokenText {
+    .modal-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end; }
+    .winner-msg {
+      font-family: 'Cinzel', serif;
+      font-size: 22px;
       font-weight: 700;
-      font-size: 14px;
-      fill: #111;
-      pointer-events: none;
+      color: var(--gold);
+      text-align: center;
+      margin: 12px 0;
+      text-shadow: 0 0 20px rgba(232,184,64,.5);
     }
-    .hex-label {
-      font-size: 12px;
-      font-weight: 600;
-      fill: rgba(0,0,0,.6);
-      pointer-events: none;
-    }
-    #diceResult.rolling { animation: diceRoll .45s ease; }
-    @keyframes diceRoll {
-      0% { transform: rotateX(0deg) scale(1); }
-      50% { transform: rotateX(180deg) scale(1.12); }
-      100% { transform: rotateX(360deg) scale(1); }
-    }
+
+    /* ── PASS OVERLAY ── */
     .pass-overlay {
       position: fixed;
       inset: 0;
-      z-index: 30;
-      background: rgba(0,0,0,.82);
+      z-index: 60;
+      background: rgba(0,0,0,.88);
       display: none;
       align-items: center;
       justify-content: center;
       text-align: center;
       padding: 24px;
+      backdrop-filter: blur(6px);
     }
     .pass-overlay.open { display: flex; }
-    .pass-overlay h2 { font-size: 32px; margin-bottom: 10px; }
-    .pass-overlay p { color: var(--muted); margin-bottom: 16px; }
-    @media (max-width: 1100px) {
-      .wrap { grid-template-columns: 1fr; }
-      #boardSvg { min-height: 420px; height: 62vh; }
-      .side { max-height: none; }
+    .pass-card {
+      background: #1e1206;
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      padding: 32px 40px;
+      max-width: 380px;
     }
+    .pass-card h2 {
+      font-family: 'Cinzel', serif;
+      font-size: 26px;
+      color: var(--gold);
+      margin-bottom: 8px;
+    }
+    .pass-card p { color: var(--ink-muted); margin-bottom: 20px; font-size: 15px; }
+
+    /* ── TOAST ── */
+    #toastContainer {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 8px;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .toast {
+      background: #1e1206;
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 9px 14px;
+      font-family: 'Crimson Pro', serif;
+      font-size: 14px;
+      color: var(--gold);
+      box-shadow: 0 4px 20px rgba(0,0,0,.6);
+      animation: toastIn .25s ease forwards;
+      max-width: 380px;
+      text-align: center;
+    }
+    .toast.fade-out { animation: toastOut .3s ease forwards; }
+    @keyframes toastIn  { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes toastOut { from { opacity:1; transform: translateY(0); }   to { opacity:0; transform: translateY(-8px); } }
+
+    /* ── SCROLL CUSTOMIZATION ── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: rgba(0,0,0,.2); }
+    ::-webkit-scrollbar-thumb { background: var(--gold-dim); border-radius: 3px; }
+
+    /* ── PLAYER TYPE CONFIG ── */
+    #playerTypeConfig, #playerNameConfig { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+    #playerTypeConfig label, #playerNameConfig label { font-size: 12px; color: var(--ink-muted); }
+
+    /* ── AI THINKING ── */
+    .ai-thinking-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      color: var(--ink-muted);
+      padding: 3px 8px;
+      background: rgba(255,255,255,.05);
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.1);
+    }
+    .ai-dot {
+      width: 7px; height: 7px;
+      background: var(--gold);
+      border-radius: 50%;
+      animation: aiPulse 0.9s infinite;
+    }
+    @keyframes aiPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.3;transform:scale(.7)} }
+
+    /* ── RESOURCE PRODUCTION FLASH ── */
+    .hex-flash {
+      animation: hexFlash .8s ease;
+    }
+    @keyframes hexFlash {
+      0% { filter: brightness(1); }
+      50% { filter: brightness(1.8) drop-shadow(0 0 8px rgba(255,220,50,.9)); }
+      100% { filter: brightness(1); }
+    }
+
+    /* ── LEGEND ── */
+    .legend { font-size: 11px; color: var(--ink-muted); line-height: 1.5; margin-top: 4px; }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 1100px) {
+      .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; height: auto; min-height: 100vh; }
+      .board-area { height: 60vw; min-height: 360px; max-height: 580px; }
+      .side { max-height: 580px; }
+      .app-header { grid-column: 1; }
+    }
+    @media (max-width: 600px) {
+      .app-title h1 { font-size: 17px; }
+      .board-area { height: 65vw; }
+    }
+
+    /* ── SVG BOARD CLASSES ── */
+    .hex-terrain { transition: filter .2s; }
+    .hex-terrain:hover { filter: brightness(1.15); }
+    .token-text { font-weight: 700; font-size: 15px; fill: #1a0e00; font-family: 'Cinzel', serif; pointer-events: none; }
+    .token-text.red { fill: #b00020; }
+    .hex-res-label { font-size: 11px; fill: rgba(0,0,0,.5); font-style: italic; pointer-events: none; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <section class="board-panel">
-      <div class="board-header">
-        <div class="title">
-          <h1>Catan (Single File)</h1>
-          <small>Local multiplayer adaptation: 2–4 players, first to 10 victory points.</small>
-        </div>
-        <div class="row">
-          <span id="phasePill" class="pill">Setup</span>
-          <span id="turnPill" class="pill">Turn: —</span>
-          <span id="subturnPill" class="pill">Status: —</span>
-        </div>
-      </div>
-      <svg id="boardSvg" viewBox="0 0 1200 900"></svg>
-    </section>
+<div class="app">
 
-    <aside class="side">
-      <section class="section">
-        <h2>Game Setup</h2>
-        <div class="row">
+  <!-- HEADER -->
+  <header class="app-header">
+    <div class="app-title">
+      <h1>⚓ CATAN</h1>
+      <span>Local Multiplayer · First to 10 VP wins</span>
+    </div>
+    <div class="header-pills">
+      <span id="phasePill" class="pill phase">Setup</span>
+      <span id="turnPill" class="pill turn">—</span>
+      <span id="subturnPill" class="pill status">—</span>
+      <span id="aiThinkingBadge" style="display:none;" class="ai-thinking-badge">
+        <span class="ai-dot"></span> AI thinking…
+      </span>
+    </div>
+  </header>
+
+  <!-- BOARD -->
+  <main class="board-area">
+    <svg id="boardSvg" viewBox="0 0 1200 900" preserveAspectRatio="xMidYMid meet"></svg>
+  </main>
+
+  <!-- SIDE PANEL -->
+  <aside class="side">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="actions">🎲 Actions</button>
+      <button class="tab-btn" data-tab="trade">💰 Trade</button>
+      <button class="tab-btn" data-tab="players">👥 Players</button>
+      <button class="tab-btn" data-tab="log">📜 Log</button>
+    </div>
+
+    <!-- ACTIONS TAB -->
+    <div class="tab-panel active" id="tab-actions">
+      <!-- Setup -->
+      <div>
+        <div class="section-title">Game Setup</div>
+        <div class="setup-row">
           <label>Players</label>
           <select id="playerCount">
             <option value="2">2</option>
@@ -263,1627 +596,1698 @@
           </select>
           <button id="newGameBtn" class="primary">New Game</button>
         </div>
-        <div id="playerTypeConfig" class="row" style="margin-top:10px;"></div>
-        <div id="playerNameConfig" class="row" style="margin-top:10px;"></div>
-        <div class="legend">
-          Setup flow: each player places a settlement and an adjacent road in order, then reverse order for second placement.
-        </div>
-      </section>
+        <div id="playerTypeConfig"></div>
+        <div id="playerNameConfig"></div>
+        <div class="legend" style="margin-top:6px;">R = Roll · E = End Turn · Esc = Cancel</div>
+      </div>
 
-      <section class="section">
-        <h2>Turn Actions</h2>
-        <div class="row">
-          <button id="rollBtn" class="primary">Roll Dice</button>
-          <span id="diceResult" class="pill">Dice: —</span>
+      <!-- Dice -->
+      <div>
+        <div class="section-title">Dice Roll</div>
+        <div class="dice-box">
+          <div class="dice-pair">
+            <div class="die-face" id="die1"><svg class="die-svg" viewBox="0 0 26 26" id="dieSvg1"></svg></div>
+            <div class="die-face" id="die2"><svg class="die-svg" viewBox="0 0 26 26" id="dieSvg2"></svg></div>
+          </div>
+          <div class="dice-total" id="diceTotal">—</div>
+          <div class="dice-buttons">
+            <button id="rollBtn" class="gold">Roll!</button>
+            <button id="endTurnBtn" class="primary">End Turn</button>
+          </div>
         </div>
-        <div class="row">
-          <button id="buildRoadBtn">Build Road (1 brick, 1 lumber)</button>
-          <button id="buildSettlementBtn">Build Settlement (1 each b/l/w/g)</button>
-        </div>
-        <div class="row">
-          <button id="buildCityBtn">Build City (2 grain, 3 ore)</button>
-          <button id="buyDevBtn">Buy Dev Card (w/g/o)</button>
-        </div>
-        <div id="devCardButtons" class="row">
-          <button id="playKnightBtn">Play Knight</button>
-          <button id="playRoadBuildBtn">Play Road Building</button>
-          <button id="playYearBtn">Play Year of Plenty</button>
-        </div>
-        <div class="row">
-          <button id="playMonoBtn">Play Monopoly</button>
-          <button id="endTurnBtn" class="primary">End Turn</button>
-          <button id="cancelActionBtn">Cancel Action</button>
-        </div>
-        <div id="actionHint" class="legend">Action: none</div>
-        <div class="legend">
-          Click highlighted edges/intersections/hexes to complete selected action.
-        </div>
-      </section>
+      </div>
 
-      <section class="section">
-        <h2>Trading</h2>
-        <div class="row">
-          <label>Give</label><select id="tradeGive"></select>
-          <label>Get</label><select id="tradeGet"></select>
-          <button id="bankTradeBtn">Bank Trade</button>
+      <!-- Action Hint -->
+      <div id="actionHint" class="action-hint inactive">No pending action</div>
+      <div style="text-align:right"><button id="cancelActionBtn" style="font-size:11px; padding:4px 8px;">✕ Cancel</button></div>
+
+      <!-- Build -->
+      <div>
+        <div class="section-title">Build</div>
+        <div class="build-grid">
+          <button id="buildRoadBtn" class="build-btn">
+            <span class="btn-label">🛤 Road</span>
+            <span class="btn-cost">🧱+🪵</span>
+          </button>
+          <button id="buildSettlementBtn" class="build-btn">
+            <span class="btn-label">🏠 Settlement</span>
+            <span class="btn-cost">🧱+🪵+🐑+🌾</span>
+          </button>
+          <button id="buildCityBtn" class="build-btn">
+            <span class="btn-label">🏰 City</span>
+            <span class="btn-cost">🌾🌾+⛏⛏⛏</span>
+          </button>
+          <button id="buyDevBtn" class="build-btn">
+            <span class="btn-label">🃏 Dev Card</span>
+            <span class="btn-cost">🐑+🌾+⛏</span>
+          </button>
         </div>
-        <div class="row">
+      </div>
+
+      <!-- Dev Cards -->
+      <div id="devCardSection" style="display:none;">
+        <div class="section-title">Development Cards</div>
+        <div class="dev-btns">
+          <div class="dev-btn-row">
+            <button id="playKnightBtn">⚔️ Knight</button>
+            <button id="playRoadBuildBtn">🛤 Road Build</button>
+          </div>
+          <div class="dev-btn-row">
+            <button id="playYearBtn">🌟 Year of Plenty</button>
+            <button id="playMonoBtn">💸 Monopoly</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TRADE TAB -->
+    <div class="tab-panel" id="tab-trade">
+      <div class="trade-group">
+        <div class="section-title">Bank Trade</div>
+        <div class="trade-row">
+          <label>Give</label>
+          <select id="tradeGive"></select>
+          <span class="trade-rate" id="tradeRateDisplay">4:1</span>
+          <label>Get</label>
+          <select id="tradeGet"></select>
+        </div>
+        <div class="trade-row">
+          <button id="bankTradeBtn" class="gold" style="width:100%;">Trade with Bank</button>
+        </div>
+        <div class="legend">Ports can give 3:1 (generic) or 2:1 (specific resource).</div>
+      </div>
+
+      <div class="trade-group">
+        <div class="section-title">Player Trade</div>
+        <div class="trade-row">
           <label>To</label><select id="offerTo"></select>
-          <label>Offer</label><input id="offerGiveQty" type="number" min="1" value="1" />
-          <select id="offerGive"></select>
-          <label>For</label><input id="offerWantQty" type="number" min="1" value="1" />
-          <select id="offerWant"></select>
-          <button id="playerTradeBtn">Offer Trade</button>
         </div>
-      </section>
-
-      <section class="section">
-        <h2>Players</h2>
-        <div id="playersPanel" class="players"></div>
-      </section>
-
-      <section class="section" style="flex:1; min-height: 180px;">
-        <h2>Game Log</h2>
-        <div id="log" class="log"></div>
-      </section>
-    </aside>
-  </div>
-
-  <div id="modal" class="modal">
-    <div class="card">
-      <h2 id="modalTitle">About this implementation</h2>
-      <div id="modalBody" class="modal-content">
-        <p style="color: var(--muted); line-height:1.5;">
-          This is a complete single-file digital adaptation of Catan core gameplay for local pass-and-play.
-          It includes full board generation, setup placement, dice resource production, robber handling,
-          roads/settlements/cities, development cards (Knight, Road Building, Year of Plenty, Monopoly,
-          and hidden victory points), largest army / longest road scoring, turn order, bank and player trading,
-          and automatic win detection at 10 victory points.
-        </p>
-      </div>
-      <div class="modal-actions">
-        <button id="modalSecondaryBtn" style="display:none;"></button>
-        <button id="closeModal" class="primary">Start / Continue</button>
+        <div class="trade-row">
+          <label>Offer</label>
+          <input id="offerGiveQty" type="number" min="1" value="1" />
+          <select id="offerGive"></select>
+        </div>
+        <div class="trade-row">
+          <label>Want</label>
+          <input id="offerWantQty" type="number" min="1" value="1" />
+          <select id="offerWant"></select>
+        </div>
+        <div class="trade-row">
+          <button id="playerTradeBtn" class="primary" style="width:100%;">Offer Trade</button>
+        </div>
       </div>
     </div>
-  </div>
-  <div id="passOverlay" class="pass-overlay">
-    <div class="card">
-      <h2 id="passTitle">Pass device</h2>
-      <p id="passBody">Next player's turn.</p>
-      <button id="passContinueBtn" class="primary">Continue</button>
+
+    <!-- PLAYERS TAB -->
+    <div class="tab-panel" id="tab-players">
+      <div id="playersPanel" style="display:flex;flex-direction:column;gap:8px;"></div>
+    </div>
+
+    <!-- LOG TAB -->
+    <div class="tab-panel" id="tab-log" style="flex:1;">
+      <div class="log-box" id="logBox"></div>
+    </div>
+  </aside>
+</div>
+
+<!-- MODALS -->
+<div id="modal" class="modal">
+  <div class="modal-card">
+    <h2 id="modalTitle">Catan</h2>
+    <div id="modalBody"></div>
+    <div class="modal-actions">
+      <button id="modalSecondaryBtn" style="display:none;"></button>
+      <button id="closeModal" class="primary">Continue</button>
     </div>
   </div>
+</div>
 
-  <script>
-    const RES = ["brick", "lumber", "wool", "grain", "ore"];
-    const RES_ICONS = {
-      brick: "🧱",
-      lumber: "🪵",
-      wool: "🐑",
-      grain: "🌾",
-      ore: "⛏️"
-    };
-    const HEX_COLORS = {
-      brick: "#c96b4f",
-      lumber: "#4e8d5a",
-      wool: "#9ac36f",
-      grain: "#e3c96a",
-      ore: "#8f98a0",
-      desert: "#d7bf8a"
-    };
-    const P_COLORS = ["#e76f51", "#2a9d8f", "#e9c46a", "#a78bfa"];
+<div id="passOverlay" class="pass-overlay">
+  <div class="pass-card">
+    <h2 id="passTitle">Pass Device</h2>
+    <p id="passBody">Pass to the next player, then tap Continue.</p>
+    <button id="passContinueBtn" class="gold" style="font-size:16px;padding:10px 28px;">Continue →</button>
+  </div>
+</div>
 
-    const COST = {
-      road: { brick: 1, lumber: 1 },
-      settlement: { brick: 1, lumber: 1, wool: 1, grain: 1 },
-      city: { grain: 2, ore: 3 },
-      dev: { wool: 1, grain: 1, ore: 1 }
-    };
+<div id="toastContainer"></div>
 
-    const state = {
-      svg: null,
-      hexes: [],
-      intersections: [],
-      edges: [],
-      players: [],
-      devDeck: [],
-      current: 0,
-      diceRolled: false,
-      phase: "setup",
-      setupOrder: [],
-      setupStep: 0,
-      robberHex: null,
-      pendingAction: null,
-      turn: 1,
-      bank: { brick: 19, lumber: 19, wool: 19, grain: 19, ore: 19 },
-      largestArmyOwner: null,
-      longestRoadOwner: null,
-      aiThinking: false,
-      devCardPlayedThisTurn: false,
-      discardQueue: [],
-      renderQueued: false
-    };
+<script>
+  /* ═══════════════════════════════════════════════════
+     CONSTANTS & STATE
+  ═══════════════════════════════════════════════════ */
+  const RES = ["brick","lumber","wool","grain","ore"];
+  const RES_ICONS = { brick:"🧱", lumber:"🪵", wool:"🐑", grain:"🌾", ore:"⛏️" };
+  const TERRAIN_ICONS = { brick:"🧱", lumber:"🌲", wool:"🐑", grain:"🌾", ore:"⛰️", desert:"🏜️" };
+  const HEX_COLORS = {
+    brick:  { light:"#c96b4f", dark:"#8b3820", mid:"#b55538" },
+    lumber: { light:"#5a9940", dark:"#2d6b18", mid:"#3e7a28" },
+    wool:   { light:"#9ac36f", dark:"#608030", mid:"#7aac40" },
+    grain:  { light:"#e3c96a", dark:"#a88018", mid:"#c8a030" },
+    ore:    { light:"#8f98a0", dark:"#4a5a68", mid:"#6a7a88" },
+    desert: { light:"#dfc878", dark:"#987830", mid:"#c0a048" }
+  };
+  const P_COLORS = ["#e05030","#20a0b0","#d8c030","#9050d0"];
+  const COST = {
+    road:       { brick:1, lumber:1 },
+    settlement: { brick:1, lumber:1, wool:1, grain:1 },
+    city:       { grain:2, ore:3 },
+    dev:        { wool:1, grain:1, ore:1 }
+  };
 
-    const el = (id) => document.getElementById(id);
-    const logBox = el("log");
+  const state = {
+    svg: null,
+    hexes: [], intersections: [], edges: [],
+    players: [], devDeck: [],
+    current: 0, diceRolled: false, lastRoll: null,
+    phase: "setup", setupOrder: [], setupStep: 0,
+    robberHex: null, pendingAction: null,
+    turn: 1,
+    bank: { brick:19, lumber:19, wool:19, grain:19, ore:19 },
+    largestArmyOwner: null, longestRoadOwner: null,
+    aiThinking: false, devCardPlayedThisTurn: false,
+    discardQueue: [], renderQueued: false
+  };
 
-    function log(msg) {
-      const t = new Date().toLocaleTimeString();
-      logBox.innerHTML = `[${t}] ${msg}<br>` + logBox.innerHTML;
+  const $ = id => document.getElementById(id);
+  let activeTab = "actions";
+
+  /* ═══════════════════════════════════════════════════
+     TOAST SYSTEM
+  ═══════════════════════════════════════════════════ */
+  function toast(msg, duration=2800) {
+    const t = document.createElement("div");
+    t.className = "toast";
+    t.textContent = msg;
+    $("toastContainer").appendChild(t);
+    setTimeout(() => {
+      t.classList.add("fade-out");
+      setTimeout(() => t.remove(), 350);
+    }, duration);
+  }
+
+  /* ═══════════════════════════════════════════════════
+     LOGGING
+  ═══════════════════════════════════════════════════ */
+  function classifyLog(msg) {
+    const m = msg.toLowerCase();
+    if (m.includes("win") || m.includes("victory")) return "log-win";
+    if (m.includes("rolled") || m.includes("started") || m.includes("passes")) return "log-info";
+    if (m.includes("brick")||m.includes("lumber")||m.includes("wool")||m.includes("grain")||m.includes("ore")||m.includes("resource")) return "log-res";
+    if (m.includes("road")||m.includes("settlement")||m.includes("city")) return "log-build";
+    if (m.includes("robber")||m.includes("stole")||m.includes("knight")||m.includes("discard")) return "log-robber";
+    if (m.includes("trade")||m.includes("bank")||m.includes("monopoly")) return "log-trade";
+    if (m.includes("dev")||m.includes("card")||m.includes("played")||m.includes("year of")) return "log-dev";
+    return "log-info";
+  }
+
+  function log(msg) {
+    const box = $("logBox");
+    const t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const div = document.createElement("div");
+    div.className = `log-entry ${classifyLog(msg)}`;
+    div.innerHTML = `<span class="ts">${t}</span>${msg}`;
+    box.prepend(div);
+  }
+
+  /* ═══════════════════════════════════════════════════
+     BOARD GENERATION
+  ═══════════════════════════════════════════════════ */
+  function shuffle(a) {
+    for (let i=a.length-1;i>0;i--) {
+      const j=Math.floor(Math.random()*(i+1));
+      [a[i],a[j]]=[a[j],a[i]];
     }
+    return a;
+  }
+  function sleep(ms) { return new Promise(r=>setTimeout(r,ms)); }
 
-    function shuffle(a) {
-      for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
-      }
-      return a;
+  function isAdjacentHex(a,b) {
+    const dq=a.q-b.q, dr=a.r-b.r;
+    return (dq===1&&dr===0)||(dq===-1&&dr===0)||
+           (dq===0&&dr===1)||(dq===0&&dr===-1)||
+           (dq===1&&dr===-1)||(dq===-1&&dr===1);
+  }
+
+  function mkBoard() {
+    const coords=[];
+    const radius=2;
+    for (let q=-radius;q<=radius;q++) {
+      const r1=Math.max(-radius,-q-radius);
+      const r2=Math.min(radius,-q+radius);
+      for (let r=r1;r<=r2;r++) coords.push({q,r});
     }
-
-    function sleep(ms) {
-      return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    function isAdjacentHex(a, b) {
-      const dq = a.q - b.q;
-      const dr = a.r - b.r;
-      return (
-        (dq === 1 && dr === 0) || (dq === -1 && dr === 0) ||
-        (dq === 0 && dr === 1) || (dq === 0 && dr === -1) ||
-        (dq === 1 && dr === -1) || (dq === -1 && dr === 1)
-      );
-    }
-
-    function mkBoard() {
-      const coords = [];
-      const radius = 2;
-      for (let q = -radius; q <= radius; q++) {
-        const r1 = Math.max(-radius, -q - radius);
-        const r2 = Math.min(radius, -q + radius);
-        for (let r = r1; r <= r2; r++) coords.push({ q, r });
-      }
-
-      const resources = shuffle([
-        ...Array(3).fill("brick"),
-        ...Array(4).fill("lumber"),
-        ...Array(4).fill("wool"),
-        ...Array(4).fill("grain"),
-        ...Array(3).fill("ore"),
-        "desert"
-      ]);
-
-      const numbersPool = [2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12];
-
-      state.hexes = coords.map((c, i) => {
-        const res = resources[i];
-        return { id: i, q: c.q, r: c.r, resource: res, token: null, robber: res === "desert" };
+    const resources=shuffle([
+      ...Array(3).fill("brick"),...Array(4).fill("lumber"),
+      ...Array(4).fill("wool"),...Array(4).fill("grain"),
+      ...Array(3).fill("ore"),"desert"
+    ]);
+    const numbersPool=[2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12];
+    state.hexes=coords.map((c,i)=>{
+      const res=resources[i];
+      return {id:i,q:c.q,r:c.r,resource:res,token:null,robber:res==="desert"};
+    });
+    const nh=state.hexes.filter(h=>h.resource!=="desert");
+    let ok=false;
+    for (let a=0;a<600&&!ok;a++) {
+      const cand=shuffle([...numbersPool]);
+      nh.forEach((h,i)=>h.token=cand[i]);
+      ok=nh.every(h=>{
+        if(h.token!==6&&h.token!==8)return true;
+        return !nh.some(o=>o.id!==h.id&&(o.token===6||o.token===8)&&isAdjacentHex(h,o));
       });
-      const numberedHexes = state.hexes.filter(h => h.resource !== "desert");
-
-      let assigned = false;
-      for (let attempt = 0; attempt < 600 && !assigned; attempt++) {
-        const candidate = shuffle([...numbersPool]);
-        numberedHexes.forEach((h, idx) => h.token = candidate[idx]);
-        const ok = numberedHexes.every(h => {
-          if (h.token !== 6 && h.token !== 8) return true;
-          return !numberedHexes.some(o => o.id !== h.id && (o.token === 6 || o.token === 8) && isAdjacentHex(h, o));
-        });
-        if (ok) assigned = true;
-      }
-      if (!assigned) {
-        const fallback = shuffle([...numbersPool]);
-        numberedHexes.forEach((h, idx) => h.token = fallback[idx]);
-      }
-      state.robberHex = state.hexes.find(h => h.robber).id;
     }
+    if(!ok){const f=shuffle([...numbersPool]);nh.forEach((h,i)=>h.token=f[i]);}
+    state.robberHex=state.hexes.find(h=>h.robber).id;
+  }
 
-    function axialToPixel(q, r) {
-      const size = 82;
-      const x = 600 + size * Math.sqrt(3) * (q + r / 2);
-      const y = 450 + size * 1.5 * r;
-      return { x, y };
+  function axialToPixel(q,r) {
+    const size=82;
+    const x=600+size*Math.sqrt(3)*(q+r/2);
+    const y=450+size*1.5*r;
+    return {x,y};
+  }
+  function hexCorners(cx,cy,size=82) {
+    const pts=[];
+    for (let i=0;i<6;i++) {
+      const angle=(Math.PI/180)*(60*i-30);
+      pts.push({x:cx+size*Math.cos(angle),y:cy+size*Math.sin(angle)});
     }
+    return pts;
+  }
+  function keyPt(p){return `${Math.round(p.x)}_${Math.round(p.y)}`;}
+  function keyEdge(a,b){return [a,b].sort().join("|");}
 
-    function hexCorners(cx, cy, size=82) {
-      const pts = [];
-      for (let i = 0; i < 6; i++) {
-        const angle = (Math.PI / 180) * (60 * i - 30);
-        pts.push({ x: cx + size * Math.cos(angle), y: cy + size * Math.sin(angle) });
-      }
-      return pts;
-    }
-
-    function keyPt(p) { return `${Math.round(p.x)}_${Math.round(p.y)}`; }
-    function keyEdge(a,b) { return [a,b].sort().join("|"); }
-
-    function buildGraph() {
-      const iMap = new Map();
-      const eMap = new Map();
-      state.intersections = [];
-      state.edges = [];
-
-      state.hexes.forEach(h => {
-        const {x,y} = axialToPixel(h.q,h.r);
-        h.cx = x; h.cy = y;
-        h.corners = hexCorners(x,y);
-        h.cornerIds = [];
-
-        h.corners.forEach((p) => {
-          const k = keyPt(p);
-          if (!iMap.has(k)) {
-            const id = state.intersections.length;
-            iMap.set(k, id);
-            state.intersections.push({ id, x: p.x, y: p.y, owner: null, type: null, adjHex: [], adjInt: [] });
-          }
-          const id = iMap.get(k);
-          h.cornerIds.push(id);
-          state.intersections[id].adjHex.push(h.id);
-        });
-
-        for (let i=0;i<6;i++) {
-          const a = h.cornerIds[i];
-          const b = h.cornerIds[(i+1)%6];
-          const k = keyEdge(a,b);
-          if (!eMap.has(k)) {
-            const id = state.edges.length;
-            eMap.set(k, id);
-            state.edges.push({ id, a, b, owner: null, adjHex: [h.id], highlight: false });
-            state.intersections[a].adjInt.push(b);
-            state.intersections[b].adjInt.push(a);
-          } else {
-            state.edges[eMap.get(k)].adjHex.push(h.id);
-          }
+  function buildGraph() {
+    const iMap=new Map(),eMap=new Map();
+    state.intersections=[];state.edges=[];
+    state.hexes.forEach(h=>{
+      const {x,y}=axialToPixel(h.q,h.r);
+      h.cx=x;h.cy=y;h.corners=hexCorners(x,y);h.cornerIds=[];
+      h.corners.forEach(p=>{
+        const k=keyPt(p);
+        if(!iMap.has(k)){
+          const id=state.intersections.length;
+          iMap.set(k,id);
+          state.intersections.push({id,x:p.x,y:p.y,owner:null,type:null,adjHex:[],adjInt:[]});
         }
+        const id=iMap.get(k);
+        h.cornerIds.push(id);
+        state.intersections[id].adjHex.push(h.id);
       });
-    }
-
-    function assignPorts() {
-      const coastal = state.intersections.filter(i => i.adjHex.length < 3).map(i => i.id);
-      coastal.forEach(id => state.intersections[id].port = null);
-      const genericCount = Math.min(4, Math.floor(coastal.length / 5));
-      const specialTypes = shuffle([...RES]).slice(0, Math.min(5, coastal.length - genericCount));
-      const pool = shuffle([...coastal]);
-      for (let i = 0; i < genericCount && pool.length; i++) {
-        state.intersections[pool.pop()].port = { ratio: 3, resource: null };
-      }
-      specialTypes.forEach(r => {
-        if (!pool.length) return;
-        state.intersections[pool.pop()].port = { ratio: 2, resource: r };
-      });
-    }
-
-    function makePlayers(n) {
-      const types = [...document.querySelectorAll(".player-type-select")];
-      const names = [...document.querySelectorAll(".player-name-input")];
-      state.players = Array.from({ length: n }, (_, i) => ({
-        id: i,
-        name: names[i]?.value?.trim() || `Player ${i+1}`,
-        color: P_COLORS[i],
-        isAI: (types[i]?.value || "human") !== "human",
-        aiLevel: types[i]?.value || "human",
-        resources: { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 },
-        roads: 15,
-        settlements: 5,
-        cities: 4,
-        dev: [],
-        knightsPlayed: 0,
-        vpCards: 0
-      }));
-    }
-
-    function makeDevDeck() {
-      state.devDeck = shuffle([
-        ...Array(14).fill("Knight"),
-        ...Array(2).fill("Road Building"),
-        ...Array(2).fill("Year of Plenty"),
-        ...Array(2).fill("Monopoly"),
-        ...Array(5).fill("Victory Point")
-      ]);
-    }
-
-    function currentPlayer() { return state.players[state.current]; }
-
-    function isDevPlayable(card, playerId) {
-      return card.boughtTurn < state.turn;
-    }
-
-    function canAfford(player, cost) {
-      return Object.entries(cost).every(([r,v]) => player.resources[r] >= v);
-    }
-    function payCost(player, cost) {
-      Object.entries(cost).forEach(([r,v]) => {
-        player.resources[r] -= v;
-        state.bank[r] += v;
-      });
-    }
-
-    function giveResource(player, res, n=1) {
-      if (state.bank[res] < n) n = state.bank[res];
-      if (n <= 0) {
-        log(`Bank of ${res} is depleted.`);
-        return;
-      }
-      player.resources[res] += n;
-      state.bank[res] -= n;
-    }
-
-    function notify(message, title = "Notice") {
-      showModal(title, `<p style="color:var(--muted);">${message}</p>`, "OK");
-    }
-
-    function placeRoad(playerId, edgeId, free=false) {
-      const e = state.edges[edgeId];
-      if (e.owner !== null) return false;
-      const p = state.players[playerId];
-      if (!free) {
-        if (!canAfford(p, COST.road) || p.roads <= 0) return false;
-        payCost(p, COST.road);
-      }
-      if (p.roads <= 0) return false;
-      e.owner = playerId;
-      p.roads--;
-      updateLongestRoad();
-      return true;
-    }
-
-    function placeSettlement(playerId, intId, free=false) {
-      const i = state.intersections[intId];
-      if (i.owner !== null) return false;
-      for (const n of i.adjInt) {
-        if (state.intersections[n].owner !== null) return false;
-      }
-      const p = state.players[playerId];
-      if (!free) {
-        if (!canAfford(p, COST.settlement) || p.settlements <= 0) return false;
-        const hasRoad = state.edges.some(e => e.owner === playerId && (e.a === intId || e.b === intId));
-        if (!hasRoad) return false;
-        payCost(p, COST.settlement);
-      }
-      if (p.settlements <= 0) return false;
-      i.owner = playerId;
-      i.type = "settlement";
-      p.settlements--;
-      return true;
-    }
-
-    function upgradeCity(playerId, intId) {
-      const i = state.intersections[intId];
-      const p = state.players[playerId];
-      if (i.owner !== playerId || i.type !== "settlement") return false;
-      if (!canAfford(p, COST.city) || p.cities <= 0) return false;
-      payCost(p, COST.city);
-      i.type = "city";
-      p.cities--;
-      p.settlements++;
-      return true;
-    }
-
-    function distributeResources(total) {
-      state.intersections.forEach(i => {
-        if (i.owner === null) return;
-        i.adjHex.forEach(hid => {
-          const h = state.hexes[hid];
-          if (h.robber || h.token !== total || h.resource === "desert") return;
-          const amt = i.type === "city" ? 2 : 1;
-          giveResource(state.players[i.owner], h.resource, amt);
-        });
-      });
-    }
-
-    function stealFrom(victimId) {
-      const victim = state.players[victimId];
-      const pool = [];
-      RES.forEach(r => { for (let k=0;k<victim.resources[r];k++) pool.push(r); });
-      if (pool.length) {
-        const stolen = pool[Math.floor(Math.random() * pool.length)];
-        victim.resources[stolen]--;
-        currentPlayer().resources[stolen]++;
-        log(`${currentPlayer().name} stole 1 ${stolen} from ${victim.name}.`);
-      }
-    }
-
-    function moveRobber(hexId, actingPid) {
-      if (hexId === state.robberHex) return;
-      state.hexes[state.robberHex].robber = false;
-      state.robberHex = hexId;
-      state.hexes[hexId].robber = true;
-      const victims = new Set();
-      state.intersections.forEach(i => {
-        if (i.owner !== null && i.owner !== actingPid && i.adjHex.includes(hexId)) victims.add(i.owner);
-      });
-      if (victims.size) {
-        if (currentPlayer().isAI) {
-          const vid = [...victims][Math.floor(Math.random() * victims.size)];
-          stealFrom(vid);
+      for(let i=0;i<6;i++){
+        const a=h.cornerIds[i],b=h.cornerIds[(i+1)%6];
+        const k=keyEdge(a,b);
+        if(!eMap.has(k)){
+          const id=state.edges.length;
+          eMap.set(k,id);
+          state.edges.push({id,a,b,owner:null,adjHex:[h.id]});
+          state.intersections[a].adjInt.push(b);
+          state.intersections[b].adjInt.push(a);
         } else {
-          state.pendingAction = { type: "steal", victims: [...victims] };
-          log(`Choose a player to steal from.`);
+          state.edges[eMap.get(k)].adjHex.push(h.id);
         }
-      } else log(`${currentPlayer().name} moved robber.`);
-    }
-
-    function maybeDiscardOnSeven() {
-      const affected = state.players.filter(p => RES.reduce((s, r) => s + p.resources[r], 0) > 7);
-      if (affected.length > 0) {
-        state.discardQueue = affected.map(p => ({
-          pid: p.id,
-          count: Math.floor(RES.reduce((s, r) => s + p.resources[r], 0) / 2)
-        }));
-        processDiscardQueue();
       }
-    }
+    });
+  }
 
-    function processDiscardQueue() {
-      if (state.discardQueue.length === 0) {
-        state.pendingAction = { type: "robber" };
-        log(`Select a hex to move the robber.`);
-        render();
-        return;
-      }
-      const next = state.discardQueue[0];
-      const p = state.players[next.pid];
-      if (p.isAI) {
-        let remaining = next.count;
-        while (remaining > 0) {
-          const avail = RES.filter(r => p.resources[r] > 0);
-          const rr = avail[Math.floor(Math.random() * avail.length)];
-          p.resources[rr]--;
-          state.bank[rr]++;
-          remaining--;
-        }
-        log(`${p.name} (AI) discarded ${next.count} cards.`);
-        state.discardQueue.shift();
-        processDiscardQueue();
+  function assignPorts() {
+    const coastal=state.intersections.filter(i=>i.adjHex.length<3).map(i=>i.id);
+    coastal.forEach(id=>state.intersections[id].port=null);
+    const genericCount=Math.min(4,Math.floor(coastal.length/5));
+    const specialTypes=shuffle([...RES]).slice(0,Math.min(5,coastal.length-genericCount));
+    const pool=shuffle([...coastal]);
+    for(let i=0;i<genericCount&&pool.length;i++){
+      state.intersections[pool.pop()].port={ratio:3,resource:null};
+    }
+    specialTypes.forEach(r=>{
+      if(!pool.length)return;
+      state.intersections[pool.pop()].port={ratio:2,resource:r};
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════
+     PLAYERS & CARDS
+  ═══════════════════════════════════════════════════ */
+  function makePlayers(n) {
+    const types=[...document.querySelectorAll(".player-type-select")];
+    const names=[...document.querySelectorAll(".player-name-input")];
+    state.players=Array.from({length:n},(_,i)=>({
+      id:i, name:names[i]?.value?.trim()||`Player ${i+1}`,
+      color:P_COLORS[i], isAI:(types[i]?.value||"human")!=="human",
+      aiLevel:types[i]?.value||"human",
+      resources:{brick:0,lumber:0,wool:0,grain:0,ore:0},
+      roads:15,settlements:5,cities:4,
+      dev:[],knightsPlayed:0,vpCards:0
+    }));
+  }
+
+  function makeDevDeck() {
+    state.devDeck=shuffle([
+      ...Array(14).fill("Knight"),...Array(2).fill("Road Building"),
+      ...Array(2).fill("Year of Plenty"),...Array(2).fill("Monopoly"),
+      ...Array(5).fill("Victory Point")
+    ]);
+  }
+
+  function currentPlayer(){return state.players[state.current];}
+  function isDevPlayable(card){return card.boughtTurn<state.turn;}
+  function canAfford(p,cost){return Object.entries(cost).every(([r,v])=>p.resources[r]>=v);}
+  function payCost(p,cost){Object.entries(cost).forEach(([r,v])=>{p.resources[r]-=v;state.bank[r]+=v;});}
+  function giveResource(p,res,n=1){
+    if(state.bank[res]<n)n=state.bank[res];
+    if(n<=0){log(`Bank of ${res} is depleted.`);return;}
+    p.resources[res]+=n;state.bank[res]-=n;
+  }
+
+  /* ═══════════════════════════════════════════════════
+     GAME ACTIONS
+  ═══════════════════════════════════════════════════ */
+  function placeRoad(playerId,edgeId,free=false){
+    const e=state.edges[edgeId];
+    if(e.owner!==null)return false;
+    const p=state.players[playerId];
+    if(!free){if(!canAfford(p,COST.road)||p.roads<=0)return false;payCost(p,COST.road);}
+    if(p.roads<=0)return false;
+    e.owner=playerId;p.roads--;updateLongestRoad();return true;
+  }
+
+  function placeSettlement(playerId,intId,free=false){
+    const i=state.intersections[intId];
+    if(i.owner!==null)return false;
+    for(const n of i.adjInt){if(state.intersections[n].owner!==null)return false;}
+    const p=state.players[playerId];
+    if(!free){
+      if(!canAfford(p,COST.settlement)||p.settlements<=0)return false;
+      const hasRoad=state.edges.some(e=>e.owner===playerId&&(e.a===intId||e.b===intId));
+      if(!hasRoad)return false;
+      payCost(p,COST.settlement);
+    }
+    if(p.settlements<=0)return false;
+    i.owner=playerId;i.type="settlement";p.settlements--;return true;
+  }
+
+  function upgradeCity(playerId,intId){
+    const i=state.intersections[intId];
+    const p=state.players[playerId];
+    if(i.owner!==playerId||i.type!=="settlement")return false;
+    if(!canAfford(p,COST.city)||p.cities<=0)return false;
+    payCost(p,COST.city);i.type="city";p.cities--;p.settlements++;return true;
+  }
+
+  function distributeResources(total){
+    const gains = {};
+    state.intersections.forEach(i=>{
+      if(i.owner===null)return;
+      i.adjHex.forEach(hid=>{
+        const h=state.hexes[hid];
+        if(h.robber||h.token!==total||h.resource==="desert")return;
+        const amt=i.type==="city"?2:1;
+        giveResource(state.players[i.owner],h.resource,amt);
+        if(!gains[i.owner])gains[i.owner]={};
+        gains[i.owner][h.resource]=(gains[i.owner][h.resource]||0)+amt;
+      });
+    });
+    Object.entries(gains).forEach(([pid,res])=>{
+      const p=state.players[+pid];
+      const parts=Object.entries(res).map(([r,v])=>`${v} ${RES_ICONS[r]}`).join(", ");
+      log(`${p.name} receives ${parts}.`);
+    });
+    if(Object.keys(gains).length===0) log("No resources produced this roll.");
+  }
+
+  function stealFrom(victimId){
+    const victim=state.players[victimId];
+    const pool=[];
+    RES.forEach(r=>{for(let k=0;k<victim.resources[r];k++)pool.push(r);});
+    if(pool.length){
+      const stolen=pool[Math.floor(Math.random()*pool.length)];
+      victim.resources[stolen]--;
+      currentPlayer().resources[stolen]++;
+      log(`${currentPlayer().name} stole 1 ${RES_ICONS[stolen]} from ${victim.name}.`);
+    } else {
+      log(`${victim.name} had nothing to steal.`);
+    }
+  }
+
+  function moveRobber(hexId,actingPid){
+    if(hexId===state.robberHex)return;
+    state.hexes[state.robberHex].robber=false;
+    state.robberHex=hexId;state.hexes[hexId].robber=true;
+    const victims=new Set();
+    state.intersections.forEach(i=>{
+      if(i.owner!==null&&i.owner!==actingPid&&i.adjHex.includes(hexId))victims.add(i.owner);
+    });
+    if(victims.size){
+      if(currentPlayer().isAI){
+        const vid=[...victims][Math.floor(Math.random()*victims.size)];
+        stealFrom(vid);
       } else {
-        state.pendingAction = { type: "discard", pid: next.pid, count: next.count };
-        log(`${p.name}: discard ${next.count} cards.`);
-        render();
+        state.pendingAction={type:"steal",victims:[...victims]};
+        log(`Choose a player to steal from.`);
+      }
+    } else log(`${currentPlayer().name} moved robber (no adjacent players).`);
+  }
+
+  function maybeDiscardOnSeven(){
+    const affected=state.players.filter(p=>RES.reduce((s,r)=>s+p.resources[r],0)>7);
+    if(affected.length>0){
+      state.discardQueue=affected.map(p=>({
+        pid:p.id,count:Math.floor(RES.reduce((s,r)=>s+p.resources[r],0)/2)
+      }));
+      processDiscardQueue();
+    }
+  }
+
+  function processDiscardQueue(){
+    if(state.discardQueue.length===0){
+      state.pendingAction={type:"robber"};
+      log(`Select a hex to move the robber.`);render();return;
+    }
+    const next=state.discardQueue[0];
+    const p=state.players[next.pid];
+    if(p.isAI){
+      let rem=next.count;
+      while(rem>0){
+        const avail=RES.filter(r=>p.resources[r]>0);
+        const rr=avail[Math.floor(Math.random()*avail.length)];
+        p.resources[rr]--;state.bank[rr]++;rem--;
+      }
+      log(`${p.name} (AI) discarded ${next.count} cards.`);
+      state.discardQueue.shift();processDiscardQueue();
+    } else {
+      state.pendingAction={type:"discard",pid:next.pid,count:next.count};
+      log(`${p.name}: discard ${next.count} cards.`);render();
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════
+     DICE
+  ═══════════════════════════════════════════════════ */
+  const PIP_POSITIONS = {
+    1:[[13,13]],
+    2:[[7,7],[19,19]],
+    3:[[7,7],[13,13],[19,19]],
+    4:[[7,7],[19,7],[7,19],[19,19]],
+    5:[[7,7],[19,7],[13,13],[7,19],[19,19]],
+    6:[[7,6],[19,6],[7,13],[19,13],[7,20],[19,20]]
+  };
+
+  function renderDieFace(svgEl, val, isRed=false) {
+    svgEl.innerHTML = "";
+    const color = isRed ? "#b00020" : "#1a0e00";
+    (PIP_POSITIONS[val]||[]).forEach(([cx,cy])=>{
+      const c=document.createElementNS("http://www.w3.org/2000/svg","circle");
+      c.setAttribute("cx",cx);c.setAttribute("cy",cy);
+      c.setAttribute("r","2.5");c.setAttribute("fill",color);
+      svgEl.appendChild(c);
+    });
+  }
+
+  function rollDice(){
+    if(state.phase!=="main"||state.diceRolled)return;
+    const d1=1+Math.floor(Math.random()*6);
+    const d2=1+Math.floor(Math.random()*6);
+    const total=d1+d2;
+    state.lastRoll=total;
+
+    [$("die1"),$("die2")].forEach(d=>{d.classList.remove("rolling");requestAnimationFrame(()=>d.classList.add("rolling"));});
+    setTimeout(()=>[$("die1"),$("die2")].forEach(d=>d.classList.remove("rolling")),550);
+
+    const isRed=total===6||total===8||total===7;
+    renderDieFace($("dieSvg1"),d1,isRed);
+    renderDieFace($("dieSvg2"),d2,isRed);
+    const tot=$("diceTotal");
+    tot.textContent=total;
+    tot.className="dice-total"+(total===7?" seven":"");
+
+    state.diceRolled=true;
+    log(`${currentPlayer().name} rolled ${d1}+${d2}=${total}.`);
+    if(total===7){
+      toast("🥷 Robber! Players with 8+ cards must discard half.");
+      maybeDiscardOnSeven();
+      if(state.discardQueue.length===0){state.pendingAction={type:"robber"};log(`Select a hex to move the robber.`);}
+    } else {
+      distributeResources(total);
+    }
+    render();
+  }
+
+  /* ═══════════════════════════════════════════════════
+     SCORING
+  ═══════════════════════════════════════════════════ */
+  function countVP(playerId){
+    const p=state.players[playerId];
+    let vp=p.vpCards;
+    state.intersections.forEach(i=>{if(i.owner===playerId)vp+=i.type==="city"?2:1;});
+    if(state.largestArmyOwner===playerId)vp+=2;
+    if(state.longestRoadOwner===playerId)vp+=2;
+    return vp;
+  }
+
+  function updateLargestArmy(){
+    let best=state.largestArmyOwner;
+    let bestCount=best!==null?state.players[best].knightsPlayed:2;
+    state.players.forEach(p=>{if(p.knightsPlayed>bestCount){bestCount=p.knightsPlayed;best=p.id;}});
+    state.largestArmyOwner=best;
+  }
+
+  function computeLongestPath(playerId){
+    const edges=state.edges.filter(e=>e.owner===playerId);
+    if(!edges.length)return 0;
+    const adj=new Map();
+    edges.forEach(e=>{
+      if(!adj.has(e.a))adj.set(e.a,[]);if(!adj.has(e.b))adj.set(e.b,[]);
+      adj.get(e.a).push(e);adj.get(e.b).push(e);
+    });
+    let best=0;
+    function dfs(node,used){
+      best=Math.max(best,used.size);
+      for(const e of(adj.get(node)||[])){
+        if(used.has(e.id))continue;
+        const next=e.a===node?e.b:e.a;
+        const block=state.intersections[next].owner!==null&&state.intersections[next].owner!==playerId;
+        used.add(e.id);
+        if(!block)dfs(next,used);else best=Math.max(best,used.size);
+        used.delete(e.id);
       }
     }
+    [...adj.keys()].forEach(n=>dfs(n,new Set()));
+    return best;
+  }
 
-    function rollDice() {
-      if (state.phase !== "main" || state.diceRolled) return;
-      const d1 = 1 + Math.floor(Math.random() * 6);
-      const d2 = 1 + Math.floor(Math.random() * 6);
-      const total = d1 + d2;
-      el("diceResult").classList.remove("rolling");
-      requestAnimationFrame(() => el("diceResult").classList.add("rolling"));
-      setTimeout(() => el("diceResult").classList.remove("rolling"), 500);
-      el("diceResult").textContent = `Dice: ${d1} + ${d2} = ${total}`;
-      state.diceRolled = true;
-      log(`${currentPlayer().name} rolled ${total}.`);
-      if (total === 7) {
-        maybeDiscardOnSeven();
-        if (state.discardQueue.length === 0) {
-            state.pendingAction = { type: "robber" };
-            log(`Select a hex to move the robber.`);
+  function updateLongestRoad(){
+    let owner=state.longestRoadOwner;
+    let best=owner!==null?computeLongestPath(owner):4;
+    state.players.forEach(p=>{const l=computeLongestPath(p.id);if(l>best){best=l;owner=p.id;}});
+    state.longestRoadOwner=owner;
+  }
+
+  /* ═══════════════════════════════════════════════════
+     ELIGIBLE SPOTS
+  ═══════════════════════════════════════════════════ */
+  function setupCanPlaceRoad(pid,edgeId,fromIntId){
+    const e=state.edges[edgeId];
+    return e.owner===null&&(e.a===fromIntId||e.b===fromIntId);
+  }
+  function eligibleRoadEdges(pid){
+    return state.edges.filter(e=>{
+      if(e.owner!==null)return false;
+      const cs=[e.a,e.b].some(i=>state.intersections[i].owner===pid);
+      const cr=[e.a,e.b].some(i=>state.edges.some(er=>er.owner===pid&&(er.a===i||er.b===i)));
+      return cs||cr;
+    }).map(e=>e.id);
+  }
+  function eligibleSettlementSpots(pid){
+    return state.intersections.filter(i=>{
+      if(i.owner!==null)return false;
+      if(i.adjInt.some(n=>state.intersections[n].owner!==null))return false;
+      if(state.phase==="setup")return true;
+      return state.edges.some(e=>e.owner===pid&&(e.a===i.id||e.b===i.id));
+    }).map(i=>i.id);
+  }
+  function eligibleCitySpots(pid){
+    return state.intersections.filter(i=>i.owner===pid&&i.type==="settlement").map(i=>i.id);
+  }
+  function getBestTradeRate(pid,giveRes){
+    let rate=4;
+    state.intersections.forEach(i=>{
+      if(i.owner!==pid||!i.port)return;
+      if(i.port.resource===null)rate=Math.min(rate,3);
+      if(i.port.resource===giveRes)rate=Math.min(rate,2);
+    });
+    return rate;
+  }
+
+  /* ═══════════════════════════════════════════════════
+     SAVE / LOAD
+  ═══════════════════════════════════════════════════ */
+  function saveGame(){
+    try{
+      localStorage.setItem("catan_save_v2",JSON.stringify(state,(k,v)=>k==="svg"?undefined:v));
+    }catch(e){}
+  }
+  function loadGame(){
+    const d=localStorage.getItem("catan_save_v2");
+    if(!d)return false;
+    try{
+      const saved=JSON.parse(d);
+      Object.assign(state,saved);
+      state.svg=$("boardSvg");
+      if(!state.intersections?.some(i=>i.port))assignPorts();
+      render();return true;
+    }catch(e){return false;}
+  }
+
+  /* ═══════════════════════════════════════════════════
+     MODALS
+  ═══════════════════════════════════════════════════ */
+  function showModal(title,bodyHtml,primaryLabel="OK",secondaryLabel=null,primaryAction=null,secondaryAction=null){
+    $("modalTitle").textContent=title;
+    $("modalBody").innerHTML=bodyHtml;
+    const pb=$("closeModal");
+    pb.textContent=primaryLabel;
+    pb.onclick=()=>{if(primaryAction)primaryAction();$("modal").classList.remove("open");};
+    const sb=$("modalSecondaryBtn");
+    if(secondaryLabel){
+      sb.style.display="inline-block";sb.textContent=secondaryLabel;
+      sb.onclick=()=>{if(secondaryAction)secondaryAction();$("modal").classList.remove("open");};
+    } else sb.style.display="none";
+    $("modal").classList.add("open");
+  }
+
+  function notify(msg,title="Notice"){
+    toast(msg);
+  }
+
+  /* ═══════════════════════════════════════════════════
+     SVG HELPERS
+  ═══════════════════════════════════════════════════ */
+  function svgEl(tag){ return document.createElementNS("http://www.w3.org/2000/svg",tag); }
+
+  function drawHouseShape(svg,cx,cy,color,size=10){
+    // House polygon: base rect + roof triangle
+    const s=size;
+    const pts=[
+      `${cx-s},${cy+s}`, // BL
+      `${cx+s},${cy+s}`, // BR
+      `${cx+s},${cy-s*0.15}`, // wall top-right
+      `${cx},${cy-s*1.55}`, // roof peak
+      `${cx-s},${cy-s*0.15}` // wall top-left
+    ].join(" ");
+    const house=svgEl("polygon");
+    house.setAttribute("points",pts);
+    house.setAttribute("fill",color);
+    house.setAttribute("stroke","rgba(0,0,0,0.6)");
+    house.setAttribute("stroke-width","1.5");
+    house.setAttribute("stroke-linejoin","round");
+    house.setAttribute("filter","url(#bldgShadow)");
+    svg.appendChild(house);
+    // Door
+    const door=svgEl("rect");
+    door.setAttribute("x",cx-s*0.32);door.setAttribute("y",cy+s*0.1);
+    door.setAttribute("width",s*0.64);door.setAttribute("height",s*0.9);
+    door.setAttribute("rx","1");
+    door.setAttribute("fill","rgba(0,0,0,0.35)");door.setAttribute("pointer-events","none");
+    svg.appendChild(door);
+  }
+
+  function drawCityShape(svg,cx,cy,color,size=12){
+    const s=size;
+    // Main building
+    const main=svgEl("rect");
+    main.setAttribute("x",cx-s);main.setAttribute("y",cy-s*0.4);
+    main.setAttribute("width",s*2);main.setAttribute("height",s*1.4);
+    main.setAttribute("fill",color);main.setAttribute("stroke","rgba(0,0,0,0.6)");
+    main.setAttribute("stroke-width","1.5");main.setAttribute("rx","1");
+    main.setAttribute("filter","url(#bldgShadow)");
+    svg.appendChild(main);
+    // Tower
+    const tower=svgEl("rect");
+    tower.setAttribute("x",cx-s*0.45);tower.setAttribute("y",cy-s*1.9);
+    tower.setAttribute("width",s*0.9);tower.setAttribute("height",s*1.5);
+    tower.setAttribute("fill",color);tower.setAttribute("stroke","rgba(0,0,0,0.6)");
+    tower.setAttribute("stroke-width","1.5");tower.setAttribute("rx","1");
+    svg.appendChild(tower);
+    // Battlement - 3 merlons
+    [-0.3,0,0.3].forEach(dx=>{
+      const m=svgEl("rect");
+      m.setAttribute("x",cx+dx*s-s*0.12);m.setAttribute("y",cy-s*1.9-s*0.4);
+      m.setAttribute("width",s*0.22);m.setAttribute("height",s*0.4);
+      m.setAttribute("fill",color);m.setAttribute("stroke","rgba(0,0,0,0.6)");
+      m.setAttribute("stroke-width","1");
+      svg.appendChild(m);
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════
+     BOARD RENDERING
+  ═══════════════════════════════════════════════════ */
+  function renderBoard(){
+    const svg=state.svg;
+    svg.innerHTML="";
+
+    // ── DEFS (gradients, filters) ──
+    const defs=svgEl("defs");
+
+    // Terrain gradients
+    Object.entries(HEX_COLORS).forEach(([res,c])=>{
+      const g=svgEl("linearGradient");
+      g.setAttribute("id",`hg-${res}`);
+      g.setAttribute("x1","0");g.setAttribute("y1","0");
+      g.setAttribute("x2","0.3");g.setAttribute("y2","1");
+      [[0,c.light],[50,c.mid],[100,c.dark]].forEach(([off,col])=>{
+        const s=svgEl("stop");
+        s.setAttribute("offset",`${off}%`);s.setAttribute("stop-color",col);
+        g.appendChild(s);
+      });
+      defs.appendChild(g);
+    });
+
+    // Ocean gradient
+    const og=svgEl("radialGradient");
+    og.setAttribute("id","oceanGrad");og.setAttribute("cx","50%");og.setAttribute("cy","50%");
+    [[0,"#194060"],[100,"#0d2137"]].forEach(([off,col])=>{
+      const s=svgEl("stop");s.setAttribute("offset",`${off}%`);s.setAttribute("stop-color",col);og.appendChild(s);
+    });
+    defs.appendChild(og);
+
+    // Drop shadow for buildings
+    const shadowFilter=svgEl("filter");
+    shadowFilter.setAttribute("id","bldgShadow");
+    shadowFilter.setAttribute("x","-20%");shadowFilter.setAttribute("y","-20%");
+    shadowFilter.setAttribute("width","140%");shadowFilter.setAttribute("height","140%");
+    const fe=svgEl("feDropShadow");
+    fe.setAttribute("dx","1");fe.setAttribute("dy","2");
+    fe.setAttribute("stdDeviation","2.5");fe.setAttribute("flood-opacity","0.55");
+    shadowFilter.appendChild(fe);defs.appendChild(shadowFilter);
+
+    // Glow filter for highlighted hexes
+    const glowFilter=svgEl("filter");
+    glowFilter.setAttribute("id","hexGlow");
+    const feBlur=svgEl("feGaussianBlur");
+    feBlur.setAttribute("stdDeviation","4");feBlur.setAttribute("result","blur");
+    const feMerge=svgEl("feMerge");
+    const fmn1=svgEl("feMergeNode");fmn1.setAttribute("in","blur");
+    const fmn2=svgEl("feMergeNode");fmn2.setAttribute("in","SourceGraphic");
+    feMerge.appendChild(fmn1);feMerge.appendChild(fmn2);
+    glowFilter.appendChild(feBlur);glowFilter.appendChild(feMerge);
+    defs.appendChild(glowFilter);
+
+    svg.appendChild(defs);
+
+    // ── OCEAN BACKGROUND ──
+    const ocean=svgEl("rect");
+    ocean.setAttribute("x","0");ocean.setAttribute("y","0");
+    ocean.setAttribute("width","1200");ocean.setAttribute("height","900");
+    ocean.setAttribute("fill","url(#oceanGrad)");
+    svg.appendChild(ocean);
+
+    // Subtle wave lines
+    for(let y=80;y<900;y+=55){
+      const wave=svgEl("path");
+      let d=`M0,${y}`;
+      for(let x=0;x<=1200;x+=80){
+        d+=` Q${x+20},${y-8} ${x+40},${y} Q${x+60},${y+8} ${x+80},${y}`;
+      }
+      wave.setAttribute("d",d);
+      wave.setAttribute("fill","none");
+      wave.setAttribute("stroke","rgba(255,255,255,0.025)");
+      wave.setAttribute("stroke-width","1.5");
+      svg.appendChild(wave);
+    }
+
+    // ── HEXES ──
+    state.hexes.forEach(h=>{
+      const isLastRoll = state.lastRoll!==null && h.token===state.lastRoll;
+      const isRobberHex = h.id===state.robberHex;
+      const canMoveRobber = state.pendingAction?.type==="robber";
+
+      // Hex polygon
+      const poly=svgEl("polygon");
+      poly.setAttribute("points",h.corners.map(p=>`${p.x},${p.y}`).join(" "));
+      poly.setAttribute("fill",`url(#hg-${h.resource})`);
+      poly.setAttribute("stroke","rgba(0,0,0,0.35)");
+      poly.setAttribute("stroke-width","2");
+      if(canMoveRobber){poly.style.cursor="pointer";}
+      if(isLastRoll&&!isRobberHex){
+        poly.setAttribute("filter","url(#hexGlow)");
+        poly.setAttribute("stroke","rgba(255,220,50,0.7)");
+        poly.setAttribute("stroke-width","3");
+      }
+      poly.addEventListener("click",()=>{
+        if(canMoveRobber){
+          if(h.id===state.robberHex){toast("Move robber to a different hex.");return;}
+          moveRobber(h.id,state.current);
+          state.pendingAction=null;render();
         }
-      } else distributeResources(total);
-      render();
-    }
-
-    function countVP(playerId) {
-      const p = state.players[playerId];
-      let vp = p.vpCards;
-      state.intersections.forEach(i => {
-        if (i.owner === playerId) vp += i.type === "city" ? 2 : 1;
       });
-      if (state.largestArmyOwner === playerId) vp += 2;
-      if (state.longestRoadOwner === playerId) vp += 2;
-      return vp;
-    }
+      svg.appendChild(poly);
 
-    function updateLargestArmy() {
-      const currentOwner = state.largestArmyOwner;
-      let best = currentOwner;
-      let bestCount = currentOwner !== null ? state.players[currentOwner].knightsPlayed : 2;
+      // Terrain icon
+      const icon=svgEl("text");
+      icon.setAttribute("x",h.cx);icon.setAttribute("y",h.cy+52);
+      icon.setAttribute("text-anchor","middle");icon.setAttribute("font-size","28");
+      icon.setAttribute("pointer-events","none");icon.setAttribute("opacity","0.75");
+      icon.textContent=TERRAIN_ICONS[h.resource];
+      svg.appendChild(icon);
 
-      state.players.forEach(p => {
-        if (p.knightsPlayed > bestCount) {
-          bestCount = p.knightsPlayed;
-          best = p.id;
+      // Resource label
+      const lbl=svgEl("text");
+      lbl.setAttribute("x",h.cx);lbl.setAttribute("y",h.cy+67);
+      lbl.setAttribute("text-anchor","middle");lbl.setAttribute("class","hex-res-label");
+      lbl.textContent=h.resource;
+      svg.appendChild(lbl);
+
+      // Number token
+      if(h.token!==null){
+        const pipsMap={2:1,3:2,4:3,5:4,6:5,8:5,9:4,10:3,11:2,12:1};
+        const isHot=h.token===6||h.token===8;
+
+        const tokenCircle=svgEl("circle");
+        tokenCircle.setAttribute("cx",h.cx);tokenCircle.setAttribute("cy",h.cy);
+        tokenCircle.setAttribute("r","23");
+        tokenCircle.setAttribute("fill",isLastRoll?"#fff8d0":"#f0e8c8");
+        tokenCircle.setAttribute("stroke",isHot?"#a00018":"#a08030");
+        tokenCircle.setAttribute("stroke-width",isHot?"2.5":"1.5");
+        tokenCircle.setAttribute("pointer-events","none");
+        if(isLastRoll){tokenCircle.setAttribute("filter","url(#bldgShadow)");}
+        svg.appendChild(tokenCircle);
+
+        const tokenText=svgEl("text");
+        tokenText.setAttribute("x",h.cx);tokenText.setAttribute("y",h.cy+5);
+        tokenText.setAttribute("text-anchor","middle");
+        tokenText.setAttribute("class",`token-text${isHot?" red":""}`);
+        tokenText.setAttribute("font-size",h.token>=10?"13":"15");
+        tokenText.textContent=h.token;
+        svg.appendChild(tokenText);
+
+        // Pip dots
+        const pips=pipsMap[h.token]||0;
+        const startX=h.cx-((pips-1)*6.5)/2;
+        for(let p=0;p<pips;p++){
+          const dot=svgEl("circle");
+          dot.setAttribute("cx",startX+p*6.5);dot.setAttribute("cy",h.cy+14);
+          dot.setAttribute("r","2");dot.setAttribute("fill",isHot?"#b00020":"#555");
+          dot.setAttribute("pointer-events","none");
+          svg.appendChild(dot);
         }
-      });
-      state.largestArmyOwner = best;
-    }
-
-    function computeLongestPath(playerId) {
-      const edges = state.edges.filter(e => e.owner === playerId);
-      if (!edges.length) return 0;
-      const adj = new Map();
-      edges.forEach(e => {
-        if (!adj.has(e.a)) adj.set(e.a, []);
-        if (!adj.has(e.b)) adj.set(e.b, []);
-        adj.get(e.a).push(e);
-        adj.get(e.b).push(e);
-      });
-
-      let best = 0;
-      function dfs(node, used) {
-        best = Math.max(best, used.size);
-        for (const e of (adj.get(node) || [])) {
-          if (used.has(e.id)) continue;
-          const next = e.a === node ? e.b : e.a;
-          const block = state.intersections[next].owner !== null && state.intersections[next].owner !== playerId;
-          used.add(e.id);
-          if (!block) dfs(next, used);
-          else best = Math.max(best, used.size);
-          used.delete(e.id);
-        }
       }
 
-      [...adj.keys()].forEach(n => dfs(n, new Set()));
-      return best;
-    }
-
-    function updateLongestRoad() {
-      const currentOwner = state.longestRoadOwner;
-      let owner = currentOwner;
-      let best = currentOwner !== null ? computeLongestPath(currentOwner) : 4;
-
-      state.players.forEach(p => {
-        const len = computeLongestPath(p.id);
-        if (len > best) {
-          best = len;
-          owner = p.id;
-        }
-      });
-      state.longestRoadOwner = owner;
-    }
-
-    function setupCanPlaceRoad(pid, edgeId, fromIntId) {
-      const e = state.edges[edgeId];
-      return e.owner === null && (e.a === fromIntId || e.b === fromIntId);
-    }
-
-    function eligibleRoadEdges(pid) {
-      return state.edges.filter(e => {
-        if (e.owner !== null) return false;
-        const connectedToSettlement = [e.a, e.b].some(i => {
-          const it = state.intersections[i];
-          return it.owner === pid;
-        });
-        const connectedToRoad = [e.a, e.b].some(i => {
-          return state.edges.some(er => er.owner === pid && (er.a === i || er.b === i));
-        });
-        return connectedToSettlement || connectedToRoad;
-      }).map(e => e.id);
-    }
-
-    function eligibleSettlementSpots(pid) {
-      return state.intersections.filter(i => {
-        if (i.owner !== null) return false;
-        if (i.adjInt.some(n => state.intersections[n].owner !== null)) return false;
-        if (state.phase === "setup") return true;
-        return state.edges.some(e => e.owner === pid && (e.a === i.id || e.b === i.id));
-      }).map(i => i.id);
-    }
-
-    function eligibleCitySpots(pid) {
-      return state.intersections.filter(i => i.owner === pid && i.type === "settlement").map(i => i.id);
-    }
-
-    function getBestTradeRate(pid, giveRes) {
-      let rate = 4;
-      state.intersections.forEach(i => {
-        if (i.owner !== pid || !i.port) return;
-        if (i.port.resource === null) rate = Math.min(rate, 3);
-        if (i.port.resource === giveRes) rate = Math.min(rate, 2);
-      });
-      return rate;
-    }
-
-    function saveGame() {
-      try {
-        const data = JSON.stringify(state, (key, value) => {
-          if (key === 'svg') return undefined; // Cannot serialize DOM element
-          return value;
-        });
-        localStorage.setItem("catan_save", data);
-      } catch (e) {
-        console.error("Failed to save game", e);
+      // Robber
+      if(h.robber){
+        const rbg=svgEl("circle");
+        rbg.setAttribute("cx",h.cx);rbg.setAttribute("cy",h.cy-32);
+        rbg.setAttribute("r","17");rbg.setAttribute("fill","rgba(0,0,0,0.65)");
+        rbg.setAttribute("stroke","rgba(255,100,50,0.7)");rbg.setAttribute("stroke-width","2");
+        rbg.setAttribute("pointer-events","none");
+        svg.appendChild(rbg);
+        const rt=svgEl("text");
+        rt.setAttribute("x",h.cx);rt.setAttribute("y",h.cy-24);
+        rt.setAttribute("text-anchor","middle");rt.setAttribute("font-size","20");
+        rt.setAttribute("pointer-events","none");
+        rt.textContent="🥷";
+        svg.appendChild(rt);
       }
-    }
+    });
 
-    function loadGame() {
-      const data = localStorage.getItem("catan_save");
-      if (!data) return false;
-      try {
-        const saved = JSON.parse(data);
-        Object.assign(state, saved);
-        state.svg = el("boardSvg");
-        if (!state.intersections?.some(i => i.port)) assignPorts();
-        // Re-calculate derived values or fix object references if needed
-        render();
-        return true;
-      } catch (e) {
-        console.error("Failed to load game", e);
-        return false;
-      }
-    }
+    // ── PORT MARKERS ──
+    state.intersections.forEach(i=>{
+      if(!i.port)return;
+      const pt=svgEl("text");
+      pt.setAttribute("x",i.x+8);pt.setAttribute("y",i.y-8);
+      pt.setAttribute("font-size","10");pt.setAttribute("fill","#ffe080");
+      pt.setAttribute("pointer-events","none");pt.setAttribute("font-weight","bold");
+      pt.textContent=i.port.resource
+        ?`${i.port.ratio}:1${RES_ICONS[i.port.resource]}`
+        :`3:1⚓`;
+      svg.appendChild(pt);
+    });
 
-    function showModal(title, bodyHtml, primaryLabel = "OK", secondaryLabel = null, primaryAction = null, secondaryAction = null) {
-      el("modalTitle").textContent = title;
-      el("modalBody").innerHTML = bodyHtml;
-      const primaryBtn = el("closeModal");
-      primaryBtn.textContent = primaryLabel;
-      primaryBtn.onclick = () => {
-        if (primaryAction) primaryAction();
-        el("modal").classList.remove("open");
-      };
+    // ── ROADS ──
+    const activeRoads=state.pendingAction?.type==="road"?eligibleRoadEdges(state.current):[];
+    const setupEdges=state.pendingAction?.type==="setup-road"
+      ?state.edges.filter(e=>setupCanPlaceRoad(state.current,e.id,state.pendingAction.fromInt))
+      :[];
 
-      const secondaryBtn = el("modalSecondaryBtn");
-      if (secondaryLabel) {
-        secondaryBtn.style.display = "inline-block";
-        secondaryBtn.textContent = secondaryLabel;
-        secondaryBtn.onclick = () => {
-          if (secondaryAction) secondaryAction();
-          el("modal").classList.remove("open");
-        };
-      } else {
-        secondaryBtn.style.display = "none";
-      }
+    state.edges.forEach(e=>{
+      const a=state.intersections[e.a],b=state.intersections[e.b];
+      const isActive=activeRoads.includes(e.id);
+      const isSetup=setupEdges.find(se=>se.id===e.id);
 
-      el("modal").classList.add("open");
-    }
+      if(e.owner!==null){
+        // Owned road
+        const shadow=svgEl("line");
+        shadow.setAttribute("x1",a.x+1.5);shadow.setAttribute("y1",a.y+2);
+        shadow.setAttribute("x2",b.x+1.5);shadow.setAttribute("y2",b.y+2);
+        shadow.setAttribute("stroke","rgba(0,0,0,0.5)");shadow.setAttribute("stroke-width","11");
+        shadow.setAttribute("stroke-linecap","round");
+        svg.appendChild(shadow);
 
-    function renderBoard() {
-      const svg = state.svg;
-      svg.innerHTML = "";
+        const road=svgEl("line");
+        road.setAttribute("x1",a.x);road.setAttribute("y1",a.y);
+        road.setAttribute("x2",b.x);road.setAttribute("y2",b.y);
+        road.setAttribute("stroke",state.players[e.owner].color);
+        road.setAttribute("stroke-width","8");road.setAttribute("stroke-linecap","round");
+        svg.appendChild(road);
 
-      state.hexes.forEach(h => {
-        const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-        poly.setAttribute("points", h.corners.map(p => `${p.x},${p.y}`).join(" "));
-        poly.setAttribute("fill", HEX_COLORS[h.resource]);
-        poly.setAttribute("stroke", "var(--hex-stroke)");
-        poly.setAttribute("stroke-width", "2");
-        poly.style.cursor = state.pendingAction?.type === "robber" ? "pointer" : "default";
-        poly.setAttribute("title", `${h.resource}${h.token ? ` • token ${h.token}` : ""}`);
-        poly.addEventListener("click", () => {
-          if (state.pendingAction?.type === "robber") {
-            if (h.id === state.robberHex) {
-              notify("You must move the robber to a different hex.");
-              return;
-            }
-            moveRobber(h.id, state.current);
-            state.pendingAction = null;
-            render();
+        // Highlight stripe
+        const shine=svgEl("line");
+        shine.setAttribute("x1",a.x);shine.setAttribute("y1",a.y);
+        shine.setAttribute("x2",b.x);shine.setAttribute("y2",b.y);
+        shine.setAttribute("stroke","rgba(255,255,255,0.25)");
+        shine.setAttribute("stroke-width","3");shine.setAttribute("stroke-linecap","round");
+        svg.appendChild(shine);
+      } else if(isSetup){
+        // Setup road highlight
+        const guide=svgEl("line");
+        guide.setAttribute("x1",a.x);guide.setAttribute("y1",a.y);
+        guide.setAttribute("x2",b.x);guide.setAttribute("y2",b.y);
+        guide.setAttribute("stroke","#ffe050");guide.setAttribute("stroke-width","7");
+        guide.setAttribute("stroke-linecap","round");guide.setAttribute("stroke-dasharray","6 4");
+        guide.style.cursor="pointer";
+        guide.addEventListener("click",()=>{
+          if(placeRoad(state.current,e.id,true)){
+            log(`${currentPlayer().name} placed setup road.`);
+            finishSetupPlacement(state.pendingAction.fromInt);render();
           }
         });
-        svg.appendChild(poly);
-
-        const lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        lbl.setAttribute("x", h.cx);
-        lbl.setAttribute("y", h.cy + 60);
-        lbl.setAttribute("text-anchor", "middle");
-        lbl.setAttribute("class", "hex-label");
-        lbl.textContent = h.resource;
-        svg.appendChild(lbl);
-
-        if (h.token !== null) {
-          const pipsMap = {2:1,3:2,4:3,5:4,6:5,8:5,9:4,10:3,11:2,12:1};
-          const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-          c.setAttribute("cx", h.cx);
-          c.setAttribute("cy", h.cy);
-          c.setAttribute("r", "24");
-          c.setAttribute("fill", "#f6e7c1");
-          c.setAttribute("stroke", "#785e26");
-          c.setAttribute("stroke-width", "2");
-          svg.appendChild(c);
-
-          const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
-          t.setAttribute("x", h.cx);
-          t.setAttribute("y", h.cy + 5);
-          t.setAttribute("text-anchor", "middle");
-          t.setAttribute("class", "tokenText");
-          t.setAttribute("fill", (h.token === 6 || h.token === 8) ? "#b00020" : "#111");
-          t.textContent = h.token;
-          svg.appendChild(t);
-
-          const pips = pipsMap[h.token] || 0;
-          const start = h.cx - ((pips - 1) * 7) / 2;
-          for (let p = 0; p < pips; p++) {
-            const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-            dot.setAttribute("cx", start + p * 7);
-            dot.setAttribute("cy", h.cy + 16);
-            dot.setAttribute("r", "2.2");
-            dot.setAttribute("fill", (h.token === 6 || h.token === 8) ? "#b00020" : "#333");
-            svg.appendChild(dot);
-          }
-        }
-
-        if (h.robber) {
-          const r = document.createElementNS("http://www.w3.org/2000/svg", "text");
-          r.setAttribute("x", h.cx);
-          r.setAttribute("y", h.cy - 34);
-          r.setAttribute("text-anchor", "middle");
-          r.setAttribute("font-size", "22");
-          r.textContent = "🥷";
-          svg.appendChild(r);
-        }
-      });
-
-      const activeRoads = state.pendingAction?.type === "road" ? eligibleRoadEdges(state.current) : [];
-      state.edges.forEach(e => {
-        const a = state.intersections[e.a], b = state.intersections[e.b];
-        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
-        line.setAttribute("x2", b.x); line.setAttribute("y2", b.y);
-        line.setAttribute("stroke-linecap", "round");
-        line.setAttribute("stroke", e.owner !== null ? state.players[e.owner].color : "rgba(255,255,255,.2)");
-        line.setAttribute("stroke-width", e.owner !== null ? "10" : (activeRoads.includes(e.id) ? "7" : "5"));
-        line.style.cursor = activeRoads.includes(e.id) ? "pointer" : "default";
-        line.addEventListener("click", () => {
-          if (state.pendingAction?.type === "road" && activeRoads.includes(e.id)) {
-            const free = state.pendingAction.free;
-            if (placeRoad(state.current, e.id, free)) {
+        svg.appendChild(guide);
+      } else if(isActive){
+        // Active road highlight
+        const guide=svgEl("line");
+        guide.setAttribute("x1",a.x);guide.setAttribute("y1",a.y);
+        guide.setAttribute("x2",b.x);guide.setAttribute("y2",b.y);
+        guide.setAttribute("stroke","rgba(255,220,50,0.55)");guide.setAttribute("stroke-width","6");
+        guide.setAttribute("stroke-linecap","round");
+        guide.style.cursor="pointer";
+        guide.addEventListener("click",()=>{
+          if(state.pendingAction?.type==="road"&&activeRoads.includes(e.id)){
+            const free=state.pendingAction.free;
+            if(placeRoad(state.current,e.id,free)){
               log(`${currentPlayer().name} built a road.`);
               state.pendingAction.remaining--;
-              if (state.pendingAction.remaining <= 0) state.pendingAction = null;
-              checkWin();
-              render();
+              if(state.pendingAction.remaining<=0)state.pendingAction=null;
+              checkWin();render();
             }
           }
         });
-        svg.appendChild(line);
-      });
-
-      const activeSet = state.pendingAction?.type === "settlement" ? eligibleSettlementSpots(state.current) : [];
-      const activeCity = state.pendingAction?.type === "city" ? eligibleCitySpots(state.current) : [];
-
-      state.intersections.forEach(i => {
-        let node;
-        if (i.type === "city") {
-          node = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-          node.setAttribute("x", i.x - 12);
-          node.setAttribute("y", i.y - 12);
-          node.setAttribute("width", 24);
-          node.setAttribute("height", 24);
-          node.setAttribute("rx", 4);
-        } else {
-          node = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-          node.setAttribute("cx", i.x);
-          node.setAttribute("cy", i.y);
-          node.setAttribute("r", i.owner === null ? (activeSet.includes(i.id) ? 8 : 5) : 9);
-        }
-
-        let fill = "#dbe4ea";
-        if (i.owner !== null) fill = state.players[i.owner].color;
-        else if (activeSet.includes(i.id)) fill = "#ffd166";
-        if (activeCity.includes(i.id)) fill = "#ffe66d";
-
-        node.setAttribute("fill", fill);
-        node.setAttribute("stroke", "rgba(0,0,0,.4)");
-        node.setAttribute("stroke-width", "2");
-        if (i.owner !== null) {
-          node.setAttribute("title", `${state.players[i.owner].name} • ${i.type}`);
-        } else if (i.port) {
-          node.setAttribute("title", i.port.resource ? `${i.port.ratio}:1 ${i.port.resource} port` : "3:1 generic port");
-        }
-        node.style.cursor = (activeSet.includes(i.id) || activeCity.includes(i.id)) ? "pointer" : "default";
-
-        node.addEventListener("click", () => {
-          if (state.pendingAction?.type === "settlement" && activeSet.includes(i.id)) {
-            const free = state.pendingAction.free;
-            if (placeSettlement(state.current, i.id, free)) {
-              log(`${currentPlayer().name} built a settlement.`);
-              if (state.phase === "setup") {
-                state.pendingAction = { type: "setup-road", fromInt: i.id };
-                log(`Setup: place adjacent road.`);
-              } else state.pendingAction = null;
-              checkWin();
-              render();
-            }
-          } else if (state.pendingAction?.type === "city") {
-            if (upgradeCity(state.current, i.id)) {
-              log(`${currentPlayer().name} upgraded to city.`);
-              state.pendingAction = null;
-              checkWin();
-              render();
-            }
-          }
-        });
-        svg.appendChild(node);
-
-        if (i.port) {
-          const portText = document.createElementNS("http://www.w3.org/2000/svg", "text");
-          portText.setAttribute("x", i.x + 10);
-          portText.setAttribute("y", i.y - 10);
-          portText.setAttribute("font-size", "10");
-          portText.setAttribute("fill", "#f5d77f");
-          portText.textContent = i.port.resource ? `${i.port.ratio}:1 ${RES_ICONS[i.port.resource]}` : "3:1";
-          svg.appendChild(portText);
-        }
-
-        if (state.pendingAction?.type === "setup-road") {
-          const edgeChoices = state.edges.filter(e => setupCanPlaceRoad(state.current, e.id, state.pendingAction.fromInt));
-          edgeChoices.forEach(e => {
-            const aa = state.intersections[e.a], bb = state.intersections[e.b];
-            const guide = document.createElementNS("http://www.w3.org/2000/svg", "line");
-            guide.setAttribute("x1", aa.x); guide.setAttribute("y1", aa.y);
-            guide.setAttribute("x2", bb.x); guide.setAttribute("y2", bb.y);
-            guide.setAttribute("stroke", "#ffe66d");
-            guide.setAttribute("stroke-width", "6");
-            guide.setAttribute("stroke-dasharray", "4 4");
-            guide.style.cursor = "pointer";
-            guide.addEventListener("click", () => {
-              if (placeRoad(state.current, e.id, true)) {
-                log(`${currentPlayer().name} placed setup road.`);
-                finishSetupPlacement(state.pendingAction.fromInt);
-                render();
-              }
-            });
-            svg.appendChild(guide);
-          });
-        }
-      });
-    }
-
-    function fillSelectors() {
-      const makeResOptions = () => RES.map(r => `<option value="${r}">${RES_ICONS[r]} ${r}</option>`).join("");
-      ["tradeGive","tradeGet","offerGive","offerWant"].forEach(id => el(id).innerHTML = makeResOptions());
-      const to = el("offerTo");
-      to.innerHTML = state.players.map((p,i)=>`<option value="${i}">${p.name}</option>`).join("");
-    }
-
-    function actionHintText() {
-      if (state.phase === "setup") {
-        if (state.pendingAction?.type === "settlement") return "Setup: place settlement.";
-        if (state.pendingAction?.type === "setup-road") return "Setup: place adjacent road.";
-      }
-      if (!state.pendingAction) return "Action: none";
-      const t = state.pendingAction.type;
-      if (t === "road") return `Building road (${state.pendingAction.remaining} left).`;
-      if (t === "settlement") return "Choose legal settlement location.";
-      if (t === "city") return "Choose your settlement to upgrade.";
-      if (t === "robber") return "Select a hex for robber movement.";
-      if (t === "setup-road") return "Setup: place adjacent road.";
-      if (t === "steal") return "Select an adjacent player to steal from.";
-      if (t === "discard") return "Discard resources.";
-      return `Action: ${t}`;
-    }
-
-    function updatePlayerTypeControls() {
-      const n = Number(el("playerCount").value);
-      const wrap = el("playerTypeConfig");
-      const namesWrap = el("playerNameConfig");
-      const existing = [...wrap.querySelectorAll("select")].map(s => s.value);
-      const existingNames = [...namesWrap.querySelectorAll("input")].map(i => i.value);
-      wrap.innerHTML = "";
-      namesWrap.innerHTML = "";
-      for (let i = 0; i < n; i++) {
-        const label = document.createElement("label");
-        label.textContent = `P${i + 1}`;
-        const sel = document.createElement("select");
-        sel.className = "player-type-select";
-        sel.innerHTML = `
-          <option value="human">Human</option>
-          <option value="ai-easy">AI Easy</option>
-          <option value="ai-normal">AI Normal</option>
-          <option value="ai-hard">AI Hard</option>
-        `;
-        sel.value = existing[i] || "human";
-        wrap.appendChild(label);
-        wrap.appendChild(sel);
-
-        const nameLabel = document.createElement("label");
-        nameLabel.textContent = `Name ${i + 1}`;
-        const nameInput = document.createElement("input");
-        nameInput.className = "player-name-input";
-        nameInput.value = existingNames[i] || `Player ${i + 1}`;
-        namesWrap.appendChild(nameLabel);
-        namesWrap.appendChild(nameInput);
-      }
-    }
-
-    function renderPanels() {
-      // Apply specialized styling for discard modal if active
-      if (state.pendingAction?.type === "discard") {
-        const p = state.players[state.pendingAction.pid];
-        const count = state.pendingAction.count;
-        const resList = RES.map(r => `
-          <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.05); padding:8px; border-radius:8px;">
-            <span>${RES_ICONS[r]} ${r}: ${p.resources[r]}</span>
-            <button onclick="doDiscard('${r}')" ${p.resources[r] > 0 ? '' : 'disabled'}>Discard 1</button>
-          </div>
-        `).join("");
-
-        showModal(
-          `${p.name}: Discard ${count} more cards`,
-          `<div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">${resList}</div>`,
-          "OK"
-        );
-        el("closeModal").style.display = "none"; // Hide OK button until done
-      }
-
-      el("phasePill").textContent = state.phase === "setup" ? `Setup ${state.setupStep+1}/${state.setupOrder.length}` : `Main - Round ${state.turn}`;
-      el("turnPill").textContent = `Turn: ${currentPlayer().name}`;
-      const status = state.phase === "setup" ? "Status: Setup" : (!state.diceRolled ? "Status: Need Roll" : "Status: Build/Trade");
-      el("subturnPill").textContent = status;
-      el("actionHint").textContent = actionHintText();
-
-      const panel = el("playersPanel");
-      panel.innerHTML = "";
-      state.players.forEach((p, i) => {
-        const totalCards = RES.reduce((s,r)=>s+p.resources[r],0);
-        const vp = countVP(i);
-        const div = document.createElement("div");
-        div.className = `player ${i===state.current?"active":""}`;
-        if (state.pendingAction?.type === "steal" && state.pendingAction.victims.includes(i)) {
-          div.classList.add("eligible-victim");
-          div.style.cursor = "pointer";
-          div.addEventListener("click", () => {
-            stealFrom(i);
-            state.pendingAction = null;
-            render();
-          });
-        }
-        div.style.borderLeftColor = p.color;
-
-        let badges = "";
-        if (state.largestArmyOwner === i) badges += `<span title="Largest Army" style="cursor:help;">🎖️</span>`;
-        if (state.longestRoadOwner === i) badges += `<span title="Longest Road" style="cursor:help;">🛤️</span>`;
-
-        const isCurrent = (i === state.current);
-        const devDisplay = isCurrent
-          ? (p.dev.length ? `${p.dev.length} playable / hidden dev cards` : "none")
-          : (p.dev.length > 0 ? `${p.dev.length} cards` : "none");
-
-        div.innerHTML = `
-          <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
-            <strong>${p.name}${p.isAI ? ` (${p.aiLevel === "ai-hard" ? "AI Hard" : (p.aiLevel === "ai-normal" ? "AI Normal" : "AI Easy")})` : ""} ${badges}</strong><span class="pill">VP: ${vp - p.vpCards} (+?)</span>
-          </div>
-          <div style="margin-top:4px; font-size:12px; color:var(--muted)">
-            Roads ${15-p.roads}/15 · Settlements ${5-p.settlements}/5 · Cities ${4-p.cities}/4 · Cards ${totalCards}
-          </div>
-          <div style="margin-top:4px; font-size:12px; color:var(--muted)">
-            Dev: ${devDisplay} · Knights played: ${p.knightsPlayed}
-          </div>
-          <div class="resources">
-            ${RES.map(r=>`<div class="resource">${RES_ICONS[r]} ${p.resources[r]}</div>`).join("")}
-          </div>
-        `;
-        panel.appendChild(div);
-      });
-
-      const isMain = state.phase === "main";
-      const p = currentPlayer();
-      const giveRes = el("tradeGive").value || RES[0];
-      const currentRate = getBestTradeRate(p.id, giveRes);
-      el("bankTradeBtn").textContent = `Bank Trade ${currentRate}:1`;
-      const hasPlayable = (name) => !state.devCardPlayedThisTurn && p.dev.some(c => c.type === name && isDevPlayable(c, p.id));
-      el("rollBtn").disabled = !isMain || state.diceRolled || state.aiThinking;
-      el("endTurnBtn").disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking;
-      ["buildRoadBtn","buildSettlementBtn","buildCityBtn","buyDevBtn","bankTradeBtn","playerTradeBtn"].forEach(id => {
-        el(id).disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking;
-      });
-      el("playKnightBtn").disabled = !isMain || state.pendingAction !== null || state.aiThinking || !hasPlayable("Knight");
-      el("playRoadBuildBtn").disabled = !isMain || state.pendingAction !== null || state.aiThinking || !hasPlayable("Road Building");
-      el("playYearBtn").disabled = !isMain || state.pendingAction !== null || state.aiThinking || !hasPlayable("Year of Plenty");
-      el("playMonoBtn").disabled = !isMain || state.pendingAction !== null || state.aiThinking || !hasPlayable("Monopoly");
-      el("cancelActionBtn").disabled = !(state.phase === "main" && state.pendingAction && state.pendingAction.type !== "robber");
-      el("devCardButtons").style.display = p.dev.length ? "flex" : "none";
-    }
-
-    function renderNow() {
-      renderBoard();
-      renderPanels();
-      saveGame();
-    }
-    function render() {
-      if (state.renderQueued) return;
-      state.renderQueued = true;
-      requestAnimationFrame(() => {
-        state.renderQueued = false;
-        renderNow();
-      });
-    }
-
-    function finishSetupPlacement(secondSettlementIntId) {
-      const idx = state.setupStep;
-      const pid = state.setupOrder[idx];
-      if (idx >= Math.floor(state.setupOrder.length / 2)) {
-        const p = state.players[pid];
-        state.intersections[secondSettlementIntId].adjHex.forEach(hid => {
-          const h = state.hexes[hid];
-          if (h.resource !== "desert") giveResource(p, h.resource, 1);
-        });
-        log(`${p.name} receives starting resources from second settlement.`);
-      }
-
-      state.setupStep++;
-      if (state.setupStep >= state.setupOrder.length) {
-        state.phase = "main";
-        state.current = 0;
-        state.pendingAction = null;
-        state.diceRolled = false;
-        log(`Setup complete. ${currentPlayer().name} begins turn 1.`);
-        maybeRunAiTurn();
+        svg.appendChild(guide);
       } else {
-        state.current = state.setupOrder[state.setupStep];
-        state.pendingAction = { type: "settlement", free: true };
+        const ghost=svgEl("line");
+        ghost.setAttribute("x1",a.x);ghost.setAttribute("y1",a.y);
+        ghost.setAttribute("x2",b.x);ghost.setAttribute("y2",b.y);
+        ghost.setAttribute("stroke","rgba(255,255,255,0.06)");ghost.setAttribute("stroke-width","3");
+        ghost.setAttribute("stroke-linecap","round");
+        svg.appendChild(ghost);
       }
+    });
+
+    // ── INTERSECTIONS ──
+    const activeSet=state.pendingAction?.type==="settlement"?eligibleSettlementSpots(state.current):[];
+    const activeCity=state.pendingAction?.type==="city"?eligibleCitySpots(state.current):[];
+
+    state.intersections.forEach(i=>{
+      const isActiveS=activeSet.includes(i.id);
+      const isActiveC=activeCity.includes(i.id);
+
+      if(i.owner!==null){
+        const color=state.players[i.owner].color;
+        if(i.type==="city") drawCityShape(svg,i.x,i.y,color,12);
+        else drawHouseShape(svg,i.x,i.y,color,10);
+
+        // Clickable overlay for city upgrade
+        if(isActiveC){
+          const overlay=svgEl("circle");
+          overlay.setAttribute("cx",i.x);overlay.setAttribute("cy",i.y);
+          overlay.setAttribute("r","20");overlay.setAttribute("fill","rgba(255,220,50,0.25)");
+          overlay.setAttribute("stroke","#ffe050");overlay.setAttribute("stroke-width","2");
+          overlay.setAttribute("stroke-dasharray","4 3");overlay.style.cursor="pointer";
+          overlay.addEventListener("click",()=>{
+            if(upgradeCity(state.current,i.id)){
+              log(`${currentPlayer().name} upgraded to city!`);
+              toast("🏰 City built!");
+              state.pendingAction=null;checkWin();render();
+            }
+          });
+          svg.appendChild(overlay);
+        }
+      } else if(isActiveS){
+        // Empty but buildable
+        const pulse=svgEl("circle");
+        pulse.setAttribute("cx",i.x);pulse.setAttribute("cy",i.y);
+        pulse.setAttribute("r","9");pulse.setAttribute("fill","rgba(255,220,50,0.4)");
+        pulse.setAttribute("stroke","#ffe050");pulse.setAttribute("stroke-width","2");
+        pulse.style.cursor="pointer";
+        pulse.addEventListener("click",()=>{
+          if(placeSettlement(state.current,i.id,state.pendingAction.free)){
+            log(`${currentPlayer().name} placed a settlement.`);
+            toast("🏠 Settlement placed!");
+            if(state.phase==="setup"){
+              state.pendingAction={type:"setup-road",fromInt:i.id};
+              log("Setup: place adjacent road.");
+            } else state.pendingAction=null;
+            checkWin();render();
+          }
+        });
+        svg.appendChild(pulse);
+        const dot=svgEl("circle");
+        dot.setAttribute("cx",i.x);dot.setAttribute("cy",i.y);
+        dot.setAttribute("r","4");dot.setAttribute("fill","#ffe050");
+        dot.setAttribute("pointer-events","none");
+        svg.appendChild(dot);
+      } else {
+        // Empty, non-clickable
+        const dot=svgEl("circle");
+        dot.setAttribute("cx",i.x);dot.setAttribute("cy",i.y);
+        dot.setAttribute("r","3.5");dot.setAttribute("fill","rgba(255,255,255,0.08)");
+        dot.setAttribute("pointer-events","none");
+        svg.appendChild(dot);
+      }
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════
+     PANEL RENDERING
+  ═══════════════════════════════════════════════════ */
+  function fillSelectors(){
+    const opts=()=>RES.map(r=>`<option value="${r}">${RES_ICONS[r]} ${r}</option>`).join("");
+    ["tradeGive","tradeGet","offerGive","offerWant"].forEach(id=>$(id).innerHTML=opts());
+    $("offerTo").innerHTML=state.players.map((p,i)=>`<option value="${i}">${p.name}</option>`).join("");
+  }
+
+  function renderPanels(){
+    // Discard UI
+    if(state.pendingAction?.type==="discard"){
+      const p=state.players[state.pendingAction.pid];
+      const count=state.pendingAction.count;
+      const resList=RES.map(r=>`
+        <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.05);padding:8px;border-radius:8px;margin-bottom:6px;">
+          <span>${RES_ICONS[r]} ${r}: ${p.resources[r]}</span>
+          <button onclick="doDiscard('${r}')" ${p.resources[r]>0?"":'disabled'} style="font-size:12px;padding:4px 8px;">Discard 1</button>
+        </div>
+      `).join("");
+      showModal(
+        `${p.name}: Discard ${count} more card${count!==1?"s":""}`,
+        `<p style="color:var(--ink-muted);margin-bottom:12px;">You have more than 7 cards — discard ${count} to the bank.</p><div>${resList}</div>`,
+        "OK"
+      );
+      $("closeModal").style.display="none";
     }
 
-    function startGame() {
-      mkBoard();
-      buildGraph();
-      assignPorts();
-      makePlayers(Number(el("playerCount").value));
-      makeDevDeck();
-      state.current = 0;
-      state.turn = 1;
-      state.diceRolled = false;
-      state.phase = "setup";
-      state.pendingAction = { type: "settlement", free: true };
-      state.setupOrder = [
-        ...state.players.map(p => p.id),
-        ...[...state.players].reverse().map(p => p.id)
-      ];
-      state.setupStep = 0;
-      state.current = state.setupOrder[0];
-      state.bank = { brick: 19, lumber: 19, wool: 19, grain: 19, ore: 19 };
-      state.largestArmyOwner = null;
-      state.longestRoadOwner = null;
-      state.aiThinking = false;
-      logBox.innerHTML = "";
-      log("New game started.");
-      log(`${currentPlayer().name}: place your first settlement.`);
-      fillSelectors();
-      render();
-      el("closeModal").click();
+    // Header pills
+    $("phasePill").textContent=state.phase==="setup"?`Setup ${state.setupStep+1}/${state.setupOrder.length}`:`Round ${state.turn}`;
+    $("turnPill").textContent=`${currentPlayer().name}'s turn`;
+    const rolled=state.diceRolled;
+    $("subturnPill").textContent=state.phase==="setup"?"Setup phase":(!rolled?"Roll dice first":"Build or trade");
+    $("aiThinkingBadge").style.display=state.aiThinking?"flex":"none";
+
+    // Action hint
+    const hint=$("actionHint");
+    const hintText=actionHintText();
+    const isActive=state.pendingAction!==null||(state.phase==="setup");
+    hint.textContent=hintText;
+    hint.className=`action-hint${isActive?"":" inactive"}`;
+
+    // Trade rate display
+    const giveRes=$("tradeGive").value||RES[0];
+    const p=currentPlayer();
+    const rate=getBestTradeRate(p.id,giveRes);
+    $("tradeRateDisplay").textContent=`${rate}:1`;
+
+    // Players panel
+    const panel=$("playersPanel");
+    panel.innerHTML="";
+    state.players.forEach((pl,i)=>{
+      const totalCards=RES.reduce((s,r)=>s+pl.resources[r],0);
+      const vp=countVP(i);
+      const div=document.createElement("div");
+      div.className=`player-card${i===state.current?" active":""}`;
+      if(state.pendingAction?.type==="steal"&&state.pendingAction.victims.includes(i)){
+        div.classList.add("eligible-victim");
+        div.addEventListener("click",()=>{stealFrom(i);state.pendingAction=null;render();});
+      }
+      div.style.borderLeftColor=pl.color;
+
+      let badges="";
+      if(state.largestArmyOwner===i)badges+=`<span class="badge" title="Largest Army (${pl.knightsPlayed} knights)">🎖️</span>`;
+      if(state.longestRoadOwner===i)badges+=`<span class="badge" title="Longest Road">🛤️</span>`;
+
+      const isCurr=(i===state.current);
+      const devText=isCurr
+        ?(pl.dev.length?`${pl.dev.length} card${pl.dev.length!==1?"s":""}`:"-")
+        :(pl.dev.length>0?`${pl.dev.length} hidden`:"none");
+
+      const vpPct=Math.min(100,(vp/10)*100);
+      div.innerHTML=`
+        <div class="player-card-header">
+          <span class="player-name" style="color:${pl.color}">${pl.name}${pl.isAI?` <small style="opacity:.6;font-size:10px;">${pl.aiLevel.replace("ai-","AI ").replace("easy","Easy").replace("normal","Normal").replace("hard","Hard")}</small>`:""} ${badges}</span>
+          <span class="player-vp">⚑ ${vp} VP</span>
+        </div>
+        <div class="vp-bar-wrap"><div class="vp-bar-fill" style="width:${vpPct}%"></div></div>
+        <div class="res-rack">
+          ${RES.map(r=>`<div class="res-chip${pl.resources[r]>0?" highlight":""}">${RES_ICONS[r]}<span>${pl.resources[r]}</span></div>`).join("")}
+          <div class="res-chip" style="background:rgba(255,255,255,.04)">🃏 ${devText}</div>
+          <div class="res-chip" style="background:rgba(255,255,255,.04)">📦 ${totalCards}</div>
+        </div>
+        <div class="player-meta">Roads ${15-pl.roads}/15 · Settlements ${5-pl.settlements}/5 · Cities ${4-pl.cities}/4 · Knights ${pl.knightsPlayed}</div>
+      `;
+      panel.appendChild(div);
+    });
+
+    // Button states
+    const isMain=state.phase==="main";
+    const hasPlayable=(name)=>!state.devCardPlayedThisTurn&&p.dev.some(c=>c.type===name&&isDevPlayable(c,p.id));
+    $("rollBtn").disabled=!isMain||rolled||state.aiThinking;
+    $("endTurnBtn").disabled=!isMain||!rolled||state.pendingAction!==null||state.aiThinking;
+    ["buildRoadBtn","buildSettlementBtn","buildCityBtn","buyDevBtn","bankTradeBtn","playerTradeBtn"].forEach(id=>{
+      $(id).disabled=!isMain||!rolled||state.pendingAction!==null||state.aiThinking;
+    });
+    $("playKnightBtn").disabled=!isMain||state.pendingAction!==null||state.aiThinking||!hasPlayable("Knight");
+    $("playRoadBuildBtn").disabled=!isMain||state.pendingAction!==null||state.aiThinking||!hasPlayable("Road Building");
+    $("playYearBtn").disabled=!isMain||state.pendingAction!==null||state.aiThinking||!hasPlayable("Year of Plenty");
+    $("playMonoBtn").disabled=!isMain||state.pendingAction!==null||state.aiThinking||!hasPlayable("Monopoly");
+    $("cancelActionBtn").disabled=!(state.phase==="main"&&state.pendingAction&&state.pendingAction.type!=="robber");
+    $("devCardSection").style.display=p.dev.length?"block":"none";
+  }
+
+  function actionHintText(){
+    if(state.phase==="setup"){
+      if(state.pendingAction?.type==="settlement")return "📍 Place your settlement (click a yellow dot)";
+      if(state.pendingAction?.type==="setup-road")return "🛤 Place an adjacent road (click a dashed edge)";
+    }
+    if(!state.pendingAction)return "No pending action";
+    const t=state.pendingAction.type;
+    if(t==="road")return `🛤 Choose edge for road (${state.pendingAction.remaining} remaining)`;
+    if(t==="settlement")return "🏠 Choose a valid settlement location";
+    if(t==="city")return "🏰 Choose your settlement to upgrade";
+    if(t==="robber")return "🥷 Click a hex to move the robber";
+    if(t==="steal")return "💰 Click a player to steal from";
+    if(t==="discard")return `🗑 Discard ${state.pendingAction.count} cards`;
+    if(t==="year-of-plenty")return `🌟 Choose ${state.pendingAction.remaining} resource(s)`;
+    if(t==="monopoly")return "💸 Choose a resource to claim";
+    return `Action: ${t}`;
+  }
+
+  function renderNow(){ renderBoard(); renderPanels(); saveGame(); }
+  function render(){
+    if(state.renderQueued)return;
+    state.renderQueued=true;
+    requestAnimationFrame(()=>{state.renderQueued=false;renderNow();});
+  }
+
+  /* ═══════════════════════════════════════════════════
+     SETUP FLOW
+  ═══════════════════════════════════════════════════ */
+  function finishSetupPlacement(secondSettlementIntId){
+    const idx=state.setupStep;
+    const pid=state.setupOrder[idx];
+    if(idx>=Math.floor(state.setupOrder.length/2)){
+      const pl=state.players[pid];
+      state.intersections[secondSettlementIntId].adjHex.forEach(hid=>{
+        const h=state.hexes[hid];
+        if(h.resource!=="desert")giveResource(pl,h.resource,1);
+      });
+      log(`${pl.name} receives starting resources.`);
+    }
+    state.setupStep++;
+    if(state.setupStep>=state.setupOrder.length){
+      state.phase="main";state.current=0;state.pendingAction=null;state.diceRolled=false;
+      log(`Setup complete! ${currentPlayer().name} starts turn 1.`);
+      toast(`🎉 Setup done! ${currentPlayer().name} goes first.`);
+      maybeRunAiTurn();
+    } else {
+      state.current=state.setupOrder[state.setupStep];
+      state.pendingAction={type:"settlement",free:true};
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════
+     GAME FLOW
+  ═══════════════════════════════════════════════════ */
+  function startGame(){
+    mkBoard();buildGraph();assignPorts();
+    makePlayers(Number($("playerCount").value));
+    makeDevDeck();
+    state.current=0;state.turn=1;state.diceRolled=false;state.lastRoll=null;
+    state.phase="setup";state.pendingAction={type:"settlement",free:true};
+    state.setupOrder=[...state.players.map(p=>p.id),...[...state.players].reverse().map(p=>p.id)];
+    state.setupStep=0;state.current=state.setupOrder[0];
+    state.bank={brick:19,lumber:19,wool:19,grain:19,ore:19};
+    state.largestArmyOwner=null;state.longestRoadOwner=null;state.aiThinking=false;
+    $("logBox").innerHTML="";
+    // Reset dice display
+    renderDieFace($("dieSvg1"),1,false);renderDieFace($("dieSvg2"),1,false);
+    $("diceTotal").textContent="—";$("diceTotal").className="dice-total";
+    log("New game started.");
+    log(`${currentPlayer().name}: place your first settlement.`);
+    fillSelectors();render();$("modal").classList.remove("open");
+    maybeRunAiTurn();
+  }
+
+  function endTurn(){
+    if(state.phase!=="main"||!state.diceRolled||state.pendingAction)return;
+    state.current=(state.current+1)%state.players.length;
+    if(state.current===0)state.turn++;
+    state.diceRolled=false;state.devCardPlayedThisTurn=false;state.lastRoll=null;
+    $("diceTotal").textContent="—";$("diceTotal").className="dice-total";
+    $("dieSvg1").innerHTML="";$("dieSvg2").innerHTML="";
+    log(`Turn passes to ${currentPlayer().name}.`);
+    render();
+    const next=currentPlayer();
+    if(!next.isAI){
+      $("passTitle").textContent=`${next.name}'s Turn`;
+      $("passBody").textContent="Pass the device to the next player, then tap Continue.";
+      $("passOverlay").classList.add("open");
+    } else {
       maybeRunAiTurn();
     }
+  }
 
-    function endTurn() {
-      if (state.phase !== "main" || !state.diceRolled || state.pendingAction) return;
-      state.current = (state.current + 1) % state.players.length;
-      if (state.current === 0) state.turn++;
-      state.diceRolled = false;
-      state.devCardPlayedThisTurn = false;
-      el("diceResult").textContent = "Dice: —";
-      log(`Turn passes to ${currentPlayer().name}.`);
-      render();
-      const next = currentPlayer();
-      if (!next.isAI) {
-        el("passTitle").textContent = `${next.name}'s turn`;
-        el("passBody").textContent = "Pass the device to the next player, then tap Continue.";
-        el("passOverlay").classList.add("open");
-      } else {
-        maybeRunAiTurn();
-      }
+  function checkWin(){
+    const p=currentPlayer();
+    const vp=countVP(p.id);
+    if(vp>=10){
+      renderNow();
+      setTimeout(()=>{
+        showModal("🏆 Game Over!",
+          `<div class="winner-msg">🎊 ${p.name} wins with ${vp} VP! 🎊</div>
+           <p style="text-align:center;color:var(--ink-muted);margin-top:8px;">Congratulations!</p>`,
+          "Play Again","Close",()=>startGame());
+        log(`${p.name} wins the game with ${vp} VP! 🏆`);
+      },200);
     }
+  }
 
-    function doDiscard(res) {
-      if (state.pendingAction?.type !== "discard") return;
-      const p = state.players[state.pendingAction.pid];
-      if (p.resources[res] > 0) {
-        p.resources[res]--;
-        state.bank[res]++;
-        state.pendingAction.count--;
-        if (state.pendingAction.count <= 0) {
-          el("modal").classList.remove("open");
-          state.discardQueue.shift();
-          processDiscardQueue();
-        } else {
-          render();
-        }
-      }
+  /* ═══════════════════════════════════════════════════
+     DEV CARDS
+  ═══════════════════════════════════════════════════ */
+  function doBuyDev(){
+    const p=currentPlayer();
+    if(!canAfford(p,COST.dev))return toast("Need 🐑🌾⛏ to buy a dev card.");
+    if(!state.devDeck.length)return toast("Dev card deck is empty.");
+    payCost(p,COST.dev);
+    const card=state.devDeck.pop();
+    if(card==="Victory Point"){
+      p.vpCards++;log(`${p.name} bought a hidden Victory Point card.`);toast("🎴 Victory Point card obtained!");
+    } else {
+      p.dev.push({type:card,boughtTurn:state.turn,boughtBy:p.id});
+      log(`${p.name} bought: ${card}.`);toast(`🃏 Bought: ${card}`);
     }
+    checkWin();render();
+  }
 
-    function chooseResource(promptText) {
-      const v = prompt(`${promptText}\nChoose: ${RES.join(", ")}`);
-      if (!v) return null;
-      const r = v.trim().toLowerCase();
-      return RES.includes(r) ? r : null;
+  function startYearOfPlenty(){
+    state.pendingAction={type:"year-of-plenty",remaining:2};
+    const body=`
+      <p style="color:var(--ink-muted);margin-bottom:12px;">Choose 2 resources from the bank.</p>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+        ${RES.map(r=>`<button onclick="doYearOfPlenty('${r}')" style="padding:10px;font-size:15px;">${RES_ICONS[r]}<br><small>${r}</small></button>`).join("")}
+      </div>
+      <div id="yopCount" style="margin-top:10px;color:var(--gold);text-align:center;font-weight:600;">Remaining: 2</div>
+    `;
+    showModal("Year of Plenty",body,"OK");
+    $("closeModal").style.display="none";
+  }
+
+  function doYearOfPlenty(res){
+    if(state.pendingAction?.type!=="year-of-plenty")return;
+    const p=currentPlayer();
+    giveResource(p,res,1);
+    state.pendingAction.remaining--;
+    if(state.pendingAction.remaining<=0){
+      log(`${p.name} used Year of Plenty.`);
+      state.pendingAction=null;$("modal").classList.remove("open");render();
+    } else {
+      $("yopCount").textContent=`Remaining: ${state.pendingAction.remaining}`;
     }
+  }
 
-    function doBuyDev() {
-      const p = currentPlayer();
-      if (!canAfford(p, COST.dev)) return notify("Not enough resources.");
-      if (!state.devDeck.length) return notify("No development cards left.");
-      payCost(p, COST.dev);
-      const card = state.devDeck.pop();
-      if (card === "Victory Point") {
-        p.vpCards++;
-        log(`${p.name} bought a hidden Victory Point card.`);
-      } else {
-        p.dev.push({ type: card, boughtTurn: state.turn, boughtBy: p.id });
-        log(`${p.name} bought development card: ${card}.`);
-      }
-      checkWin();
-      render();
+  function startMonopoly(){
+    state.pendingAction={type:"monopoly"};
+    const body=`
+      <p style="color:var(--ink-muted);margin-bottom:12px;">Claim all of one resource from all opponents.</p>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+        ${RES.map(r=>`<button onclick="doMonopoly('${r}')" style="padding:10px;font-size:15px;">${RES_ICONS[r]}<br><small>${r}</small></button>`).join("")}
+      </div>
+    `;
+    showModal("Monopoly",body,"OK");
+    $("closeModal").style.display="none";
+  }
+
+  function doMonopoly(res){
+    if(state.pendingAction?.type!=="monopoly")return;
+    const p=currentPlayer();
+    let gain=0;
+    state.players.forEach(op=>{if(op.id===p.id)return;gain+=op.resources[res];op.resources[res]=0;});
+    p.resources[res]+=gain;
+    log(`${p.name} played Monopoly on ${res}, taking ${gain} cards.`);
+    toast(`💸 Monopoly! Claimed ${gain} ${RES_ICONS[res]}`);
+    state.pendingAction=null;$("modal").classList.remove("open");render();
+  }
+
+  function playDev(cardName){
+    const p=currentPlayer();
+    if(state.devCardPlayedThisTurn)return toast("Already played a dev card this turn.");
+    const idx=p.dev.findIndex(c=>c.type===cardName&&isDevPlayable(c,p.id));
+    if(idx<0)return toast(`No playable ${cardName} card.`);
+    p.dev.splice(idx,1);
+    state.devCardPlayedThisTurn=true;
+    if(cardName==="Knight"){
+      p.knightsPlayed++;updateLargestArmy();
+      state.pendingAction={type:"robber"};
+      log(`${p.name} played Knight! Move the robber.`);toast("⚔️ Knight played! Move the robber.");
+    } else if(cardName==="Road Building"){
+      state.pendingAction={type:"road",remaining:2,free:true};
+      log(`${p.name} played Road Building – place 2 free roads.`);toast("🛤 Place 2 free roads!");
+    } else if(cardName==="Year of Plenty"){
+      startYearOfPlenty();
+    } else if(cardName==="Monopoly"){
+      startMonopoly();
     }
+    checkWin();render();
+  }
 
-    function startYearOfPlenty() {
-      state.pendingAction = { type: "year-of-plenty", remaining: 2 };
-      const body = `
-        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px;">
-          ${RES.map(r => `<button onclick="doYearOfPlenty('${r}')">${RES_ICONS[r]} ${r}</button>`).join("")}
-        </div>
-        <div id="yopCount" style="margin-top:10px; font-weight:bold;">Remaining: 2</div>
-      `;
-      showModal("Year of Plenty: Pick 2 Resources", body, "OK");
-      el("closeModal").style.display = "none";
+  /* ═══════════════════════════════════════════════════
+     TRADING
+  ═══════════════════════════════════════════════════ */
+  function doBankTrade(){
+    const p=currentPlayer();
+    const give=$("tradeGive").value,get=$("tradeGet").value;
+    const rate=getBestTradeRate(p.id,give);
+    if(give===get)return toast("Pick different resources.");
+    if(p.resources[give]<rate)return toast(`Need ${rate}× ${RES_ICONS[give]} to trade.`);
+    if(state.bank[get]<1)return toast("Bank lacks that resource.");
+    p.resources[give]-=rate;state.bank[give]+=rate;
+    p.resources[get]+=1;state.bank[get]-=1;
+    log(`${p.name} traded ${rate} ${RES_ICONS[give]} → 1 ${RES_ICONS[get]} with bank.`);
+    toast(`💱 Traded ${rate}× ${RES_ICONS[give]} for ${RES_ICONS[get]}`);
+    render();
+  }
+
+  function doPlayerTrade(){
+    const p=currentPlayer();
+    const to=Number($("offerTo").value);
+    const give=$("offerGive").value,want=$("offerWant").value;
+    const giveQty=Math.max(1,Number($("offerGiveQty").value||1));
+    const wantQty=Math.max(1,Number($("offerWantQty").value||1));
+    if(to===p.id)return toast("Choose another player.");
+    if(give===want)return toast("Use different resources.");
+    if(p.resources[give]<giveQty)return toast("Not enough resources to offer.");
+    const op=state.players[to];
+    const body=`
+      <div style="text-align:center;padding:10px 0;">
+        <div style="font-size:32px;margin-bottom:8px;">${RES_ICONS[give]}</div>
+        <div>${p.name} offers <strong>${giveQty}× ${give}</strong><br>in exchange for <strong>${wantQty}× ${want}</strong> ${RES_ICONS[want]}</div>
+      </div>
+    `;
+    showModal(`Trade offer for ${op.name}`,body,"Accept","Reject",
+      ()=>acceptPlayerTrade(p.id,op.id,give,want,giveQty,wantQty),
+      ()=>{$("modal").classList.remove("open");}
+    );
+  }
+
+  function acceptPlayerTrade(fromId,toId,give,want,giveQty,wantQty){
+    const p=state.players[fromId],op=state.players[toId];
+    if(op.resources[want]<wantQty){toast(`${op.name} doesn't have enough ${want}.`);return;}
+    p.resources[give]-=giveQty;op.resources[give]+=giveQty;
+    op.resources[want]-=wantQty;p.resources[want]+=wantQty;
+    log(`${p.name} traded ${giveQty}× ${RES_ICONS[give]} for ${wantQty}× ${RES_ICONS[want]} with ${op.name}.`);
+    toast(`🤝 Trade agreed!`);render();
+  }
+
+  function doDiscard(res){
+    if(state.pendingAction?.type!=="discard")return;
+    const p=state.players[state.pendingAction.pid];
+    if(p.resources[res]>0){
+      p.resources[res]--;state.bank[res]++;state.pendingAction.count--;
+      if(state.pendingAction.count<=0){
+        $("modal").classList.remove("open");
+        state.discardQueue.shift();processDiscardQueue();
+      } else render();
     }
+  }
 
-    function doYearOfPlenty(res) {
-      if (state.pendingAction?.type !== "year-of-plenty") return;
-      const p = currentPlayer();
-      giveResource(p, res, 1);
-      state.pendingAction.remaining--;
-      if (state.pendingAction.remaining <= 0) {
-        log(`${p.name} used Year of Plenty.`);
-        state.pendingAction = null;
-        el("modal").classList.remove("open");
-        render();
-      } else {
-        el("yopCount").textContent = `Remaining: ${state.pendingAction.remaining}`;
-      }
-    }
-
-    function startMonopoly() {
-      state.pendingAction = { type: "monopoly" };
-      const body = `
-        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px;">
-          ${RES.map(r => `<button onclick="doMonopoly('${r}')">${RES_ICONS[r]} ${r}</button>`).join("")}
-        </div>
-      `;
-      showModal("Monopoly: Pick a Resource", body, "OK");
-      el("closeModal").style.display = "none";
-    }
-
-    function doMonopoly(res) {
-      if (state.pendingAction?.type !== "monopoly") return;
-      const p = currentPlayer();
-      let gain = 0;
-      state.players.forEach(op => {
-        if (op.id === p.id) return;
-        gain += op.resources[res];
-        op.resources[res] = 0;
+  /* ═══════════════════════════════════════════════════
+     AI LOGIC
+  ═══════════════════════════════════════════════════ */
+  function aiChooseRobberHex(pid){
+    let best=null,bestScore=-999;
+    state.hexes.forEach(h=>{
+      if(h.id===state.robberHex)return;
+      let score=0;
+      state.intersections.forEach(i=>{
+        if(!i.adjHex.includes(h.id)||i.owner===null)return;
+        if(i.owner===pid)score-=(i.type==="city"?4:2);
+        else{const cards=RES.reduce((s,r)=>s+state.players[i.owner].resources[r],0);score+=(i.type==="city"?3:2)+cards*0.05;}
       });
-      p.resources[res] += gain;
-      log(`${p.name} played Monopoly on ${res} and took ${gain}.`);
-      state.pendingAction = null;
-      el("modal").classList.remove("open");
-      render();
+      if(score>bestScore){bestScore=score;best=h.id;}
+    });
+    return best??state.robberHex;
+  }
+
+  function scoreIntersectionValue(intId){
+    const i=state.intersections[intId];let score=0;
+    i.adjHex.forEach(hid=>{const h=state.hexes[hid];const pips={2:1,3:2,4:3,5:4,6:5,8:5,9:4,10:3,11:2,12:1}[h.token]||0;if(h.resource!=="desert")score+=pips;});
+    return score;
+  }
+
+  function chooseBestRoadEdge(pid,edges){
+    let best=edges[0],bestScore=-999;
+    edges.forEach(eid=>{const e=state.edges[eid];const s=scoreIntersectionValue(e.a)+scoreIntersectionValue(e.b);if(s>bestScore){bestScore=s;best=eid;}});
+    return best;
+  }
+
+  function aiPlayUtilityDev(p,pid,level){
+    if(level==="ai-easy"||state.devCardPlayedThisTurn)return false;
+    const monopoly=p.dev.find(c=>c.type==="Monopoly"&&isDevPlayable(c,pid));
+    const yop=p.dev.find(c=>c.type==="Year of Plenty"&&isDevPlayable(c,pid));
+    if(monopoly){
+      let pick="grain",best=-1;
+      RES.forEach(r=>{const total=state.players.reduce((s,op)=>s+(op.id===pid?0:op.resources[r]),0);if(total>best){best=total;pick=r;}});
+      if(best>=4){playDev("Monopoly");doMonopoly(pick);return true;}
     }
-
-    function playDev(cardName) {
-      const p = currentPlayer();
-      if (state.devCardPlayedThisTurn) return notify("Already played a dev card this turn.");
-      const idx = p.dev.findIndex(c => c.type === cardName && isDevPlayable(c, p.id));
-      if (idx < 0) return notify(`No ${cardName} card available.`);
-      p.dev.splice(idx, 1);
-      state.devCardPlayedThisTurn = true;
-
-      if (cardName === "Knight") {
-        p.knightsPlayed++;
-        updateLargestArmy();
-        state.pendingAction = { type: "robber" };
-        log(`${p.name} played Knight. Move robber.`);
-      } else if (cardName === "Road Building") {
-        state.pendingAction = { type: "road", remaining: 2, free: true };
-        log(`${p.name} played Road Building. Place 2 free roads.`);
-      } else if (cardName === "Year of Plenty") {
-        startYearOfPlenty();
-      } else if (cardName === "Monopoly") {
-        startMonopoly();
-      }
-      checkWin();
-      render();
+    if(yop){
+      playDev("Year of Plenty");
+      const shortages=Object.entries(COST.settlement).flatMap(([r,v])=>Array(Math.max(0,v-p.resources[r])).fill(r));
+      const picks=shortages.slice(0,2);
+      while(picks.length<2)picks.push("ore");
+      doYearOfPlenty(picks[0]);doYearOfPlenty(picks[1]);return true;
     }
+    return false;
+  }
 
-    function doBankTrade() {
-      const p = currentPlayer();
-      const give = el("tradeGive").value;
-      const get = el("tradeGet").value;
-      const rate = getBestTradeRate(p.id, give);
-      if (give === get) return notify("Pick different resources.");
-      if (p.resources[give] < rate) return notify(`Need ${rate} cards of given resource.`);
-      if (state.bank[get] < 1) return notify("Bank lacks requested resource.");
-      p.resources[give] -= rate; state.bank[give] += rate;
-      p.resources[get] += 1; state.bank[get] -= 1;
-      log(`${p.name} traded ${rate} ${give} for 1 ${get} with bank.`);
-      render();
-    }
+  function aiShouldPlayKnightBeforeRoll(pid){
+    return state.intersections.some(i=>{
+      if(i.owner!==pid||!i.adjHex.includes(state.robberHex))return false;
+      return [6,8,5,9].includes(state.hexes[state.robberHex].token);
+    });
+  }
 
-    function startPlayerTrade() {
-      const p = currentPlayer();
-      const to = Number(el("offerTo").value);
-      const give = el("offerGive").value;
-      const want = el("offerWant").value;
-      const giveQty = Math.max(1, Number(el("offerGiveQty").value || 1));
-      const wantQty = Math.max(1, Number(el("offerWantQty").value || 1));
-      if (to === p.id) return notify("Choose another player.");
-      if (give === want) return notify("Use different resources.");
-      if (p.resources[give] < giveQty) return notify("You do not have enough offered cards.");
-
-      const op = state.players[to];
-      const body = `
-        <p>${p.name} offers ${giveQty} ${RES_ICONS[give]} for ${wantQty} ${RES_ICONS[want]}</p>
-        <div style="display:flex; gap:10px; margin-top:10px;">
-          <button class="primary" onclick="acceptPlayerTrade(${p.id}, ${op.id}, '${give}', '${want}', ${giveQty}, ${wantQty})">Accept</button>
-          <button class="warn" onclick="cancelModal()">Reject</button>
-        </div>
-      `;
-      showModal(`Trade Offer for ${op.name}`, body, "Cancel");
-      el("closeModal").style.display = "none";
-    }
-
-    function acceptPlayerTrade(fromId, toId, give, want, giveQty, wantQty) {
-      const p = state.players[fromId];
-      const op = state.players[toId];
-      if (op.resources[want] < wantQty) {
-        notify(`${op.name} lacks enough ${want}.`);
-        cancelModal();
-        return;
-      }
-      p.resources[give] -= giveQty; op.resources[give] += giveQty;
-      op.resources[want] -= wantQty; p.resources[want] += wantQty;
-      log(`${p.name} traded ${giveQty} ${give} for ${wantQty} ${want} with ${op.name}.`);
-      cancelModal();
-      render();
-    }
-
-    function cancelModal() {
-      el("modal").classList.remove("open");
-      state.pendingAction = null;
-      render();
-    }
-
-    function doPlayerTrade() {
-      startPlayerTrade();
-    }
-
-    function checkWin() {
-      const p = currentPlayer();
-      const vp = countVP(p.id);
-      if (vp >= 10) {
-        renderNow();
-        setTimeout(() => {
-          showModal("Game Over!", `<div class="winner">${p.name} wins with ${vp} VP!</div>`, "New Game", "Close", () => startGame());
-          log(`${p.name} wins the game with ${vp} VP!`);
-        }, 200);
+  async function runAiTurn(pid){
+    if(state.current!==pid||state.phase!=="main")return;
+    const p=currentPlayer();const level=p.aiLevel||"ai-easy";
+    if(!p.isAI)return;
+    state.aiThinking=true;render();await sleep(350);
+    if(!state.diceRolled&&(level==="ai-normal"||level==="ai-hard")){
+      const pk=p.dev.find(c=>c.type==="Knight"&&isDevPlayable(c,pid));
+      if(pk&&aiShouldPlayKnightBeforeRoll(pid)){
+        playDev("Knight");await sleep(220);
+        if(state.pendingAction?.type==="robber"){moveRobber(aiChooseRobberHex(pid),pid);state.pendingAction=null;render();}
       }
     }
-
-    function aiChooseRobberHex(pid) {
-      let best = null;
-      let bestScore = -999;
-      state.hexes.forEach(h => {
-        if (h.id === state.robberHex) return;
-        let score = 0;
-        state.intersections.forEach(i => {
-          if (!i.adjHex.includes(h.id) || i.owner === null) return;
-          if (i.owner === pid) score -= (i.type === "city" ? 4 : 2);
-          else {
-            const cards = RES.reduce((s, r) => s + state.players[i.owner].resources[r], 0);
-            score += (i.type === "city" ? 3 : 2) + cards * 0.05;
-          }
-        });
-        if (score > bestScore) {
-          bestScore = score;
-          best = h.id;
-        }
-      });
-      return best ?? state.robberHex;
-    }
-
-    function scoreIntersectionValue(intId) {
-      const i = state.intersections[intId];
-      let score = 0;
-      i.adjHex.forEach(hid => {
-        const h = state.hexes[hid];
-        const pips = {2:1,3:2,4:3,5:4,6:5,8:5,9:4,10:3,11:2,12:1}[h.token] || 0;
-        if (h.resource !== "desert") score += pips;
-      });
-      return score;
-    }
-
-    function chooseBestRoadEdge(pid, edges) {
-      let best = edges[0];
-      let bestScore = -999;
-      edges.forEach(eid => {
-        const e = state.edges[eid];
-        const score = scoreIntersectionValue(e.a) + scoreIntersectionValue(e.b);
-        if (score > bestScore) {
-          bestScore = score;
-          best = eid;
-        }
-      });
-      return best;
-    }
-
-    function aiPlayUtilityDev(p, pid, level) {
-      if (level === "ai-easy" || state.devCardPlayedThisTurn) return false;
-      const monopoly = p.dev.find(c => c.type === "Monopoly" && isDevPlayable(c, pid));
-      const yop = p.dev.find(c => c.type === "Year of Plenty" && isDevPlayable(c, pid));
-      if (monopoly) {
-        let pick = "grain";
-        let best = -1;
-        RES.forEach(r => {
-          const total = state.players.reduce((s, op) => s + (op.id === pid ? 0 : op.resources[r]), 0);
-          if (total > best) { best = total; pick = r; }
-        });
-        if (best >= 4) {
-          playDev("Monopoly");
-          doMonopoly(pick);
-          return true;
-        }
-      }
-      if (yop) {
-        playDev("Year of Plenty");
-        const shortages = Object.entries(COST.settlement).flatMap(([r, v]) => Array(Math.max(0, v - p.resources[r])).fill(r));
-        const picks = shortages.slice(0, 2);
-        while (picks.length < 2) picks.push("ore");
-        doYearOfPlenty(picks[0]);
-        doYearOfPlenty(picks[1]);
-        return true;
-      }
-      return false;
-    }
-
-    function aiShouldPlayKnightBeforeRoll(pid) {
-      return state.intersections.some(i => {
-        if (i.owner !== pid || !i.adjHex.includes(state.robberHex)) return false;
-        const hex = state.hexes[state.robberHex];
-        return [6, 8, 5, 9].includes(hex.token);
-      });
-    }
-
-    async function runAiTurn(pid) {
-      if (state.current !== pid || state.phase !== "main") return;
-      const p = currentPlayer();
-      const level = p.aiLevel || "ai-easy";
-      if (!p.isAI) return;
-      state.aiThinking = true;
-      render();
-      await sleep(350);
-
-      if (!state.diceRolled && (level === "ai-normal" || level === "ai-hard")) {
-        const preRollKnight = p.dev.find(c => c.type === "Knight" && isDevPlayable(c, pid));
-        if (preRollKnight && aiShouldPlayKnightBeforeRoll(pid)) {
-          playDev("Knight");
-          await sleep(220);
-          if (state.pendingAction?.type === "robber") {
-            moveRobber(aiChooseRobberHex(pid), pid);
-            state.pendingAction = null;
-            render();
-          }
-        }
-      }
-      if (!state.diceRolled) rollDice();
-      await sleep(350);
-
-      if (state.pendingAction?.type === "robber") {
-        moveRobber(aiChooseRobberHex(pid), pid);
-        state.pendingAction = null;
-        render();
-        await sleep(250);
-      }
-
-      aiPlayUtilityDev(p, pid, level);
-      const maxBuildLoops = level === "ai-hard" ? 6 : (level === "ai-normal" ? 4 : 2);
-      for (let i = 0; i < maxBuildLoops; i++) {
-        let acted = false;
-
-        // AI Bank Trade logic
-        RES.forEach(rGive => {
-          const rate = getBestTradeRate(pid, rGive);
-          if (p.resources[rGive] >= rate) {
-            // Find what we need
-            const needs = [];
-            if (p.settlements > 0 && p.resources.brick < 1) needs.push('brick');
-            if (p.settlements > 0 && p.resources.lumber < 1) needs.push('lumber');
-            if (p.settlements > 0 && p.resources.wool < 1) needs.push('wool');
-            if (p.settlements > 0 && p.resources.grain < 1) needs.push('grain');
-            if (p.cities > 0 && p.resources.ore < 3) needs.push('ore');
-
-            if (needs.length > 0) {
-              const rGet = needs[0];
-              if (state.bank[rGet] > 0) {
-                p.resources[rGive] -= rate; state.bank[rGive] += rate;
-                p.resources[rGet] += 1; state.bank[rGet] -= 1;
-                log(`${p.name} (AI) bank traded ${rate} ${rGive} for 1 ${rGet}.`);
-                acted = true;
-              }
-            }
-          }
-        });
-
-        const citySpots = eligibleCitySpots(pid);
-        if (citySpots.length && canAfford(p, COST.city)) {
-          upgradeCity(pid, citySpots[Math.floor(Math.random() * citySpots.length)]);
-          log(`${p.name} (AI) upgraded a city.`);
-          acted = true;
-        } else {
-          const setSpots = eligibleSettlementSpots(pid);
-          if (setSpots.length && canAfford(p, COST.settlement) && p.settlements > 0) {
-            const bestSpot = level === "ai-easy"
-              ? setSpots[Math.floor(Math.random() * setSpots.length)]
-              : [...setSpots].sort((a, b) => scoreIntersectionValue(b) - scoreIntersectionValue(a))[0];
-            placeSettlement(pid, bestSpot, false);
-            log(`${p.name} (AI) built a settlement.`);
-            acted = true;
-          } else {
-            const roadEdges = eligibleRoadEdges(pid);
-            if (roadEdges.length && canAfford(p, COST.road) && p.roads > 0) {
-              const edgePick = level === "ai-easy"
-                ? roadEdges[Math.floor(Math.random() * roadEdges.length)]
-                : chooseBestRoadEdge(pid, roadEdges);
-              placeRoad(pid, edgePick, false);
-              log(`${p.name} (AI) built a road.`);
-              acted = true;
-            } else if (canAfford(p, COST.dev) && state.devDeck.length) {
-              doBuyDev();
-              acted = true;
+    if(!state.diceRolled)rollDice();
+    await sleep(350);
+    if(state.pendingAction?.type==="robber"){moveRobber(aiChooseRobberHex(pid),pid);state.pendingAction=null;render();await sleep(250);}
+    aiPlayUtilityDev(p,pid,level);
+    const maxLoops=level==="ai-hard"?6:(level==="ai-normal"?4:2);
+    for(let i=0;i<maxLoops;i++){
+      let acted=false;
+      RES.forEach(rGive=>{
+        const rate=getBestTradeRate(pid,rGive);
+        if(p.resources[rGive]>=rate){
+          const needs=[];
+          if(p.settlements>0&&p.resources.brick<1)needs.push("brick");
+          if(p.settlements>0&&p.resources.lumber<1)needs.push("lumber");
+          if(p.settlements>0&&p.resources.wool<1)needs.push("wool");
+          if(p.settlements>0&&p.resources.grain<1)needs.push("grain");
+          if(p.cities>0&&p.resources.ore<3)needs.push("ore");
+          if(needs.length>0){
+            const rGet=needs[0];
+            if(state.bank[rGet]>0){
+              p.resources[rGive]-=rate;state.bank[rGive]+=rate;
+              p.resources[rGet]+=1;state.bank[rGet]-=1;
+              log(`${p.name} (AI) traded ${rate} ${rGive} → ${rGet}.`);acted=true;
             }
           }
         }
-
-        checkWin();
-        render();
-        if (!acted) break;
-        await sleep(260);
-      }
-
-      const playableKnight = p.dev.find(c => c.type === "Knight" && isDevPlayable(c, pid));
-      if (level === "ai-normal" && playableKnight && !state.pendingAction) {
-        playDev("Knight");
-        await sleep(250);
-        if (state.pendingAction?.type === "robber") {
-          moveRobber(aiChooseRobberHex(pid), pid);
-          state.pendingAction = null;
-          render();
-          await sleep(220);
-        }
-      }
-
-      if (state.phase === "main" && state.current === pid && !state.pendingAction && state.diceRolled) {
-        state.aiThinking = false;
-        render();
-        endTurn();
+      });
+      const cs=eligibleCitySpots(pid);
+      if(cs.length&&canAfford(p,COST.city)){
+        upgradeCity(pid,cs[Math.floor(Math.random()*cs.length)]);
+        log(`${p.name} (AI) built a city.`);acted=true;
       } else {
-        state.aiThinking = false;
-        render();
-      }
-    }
-
-    function maybeRunAiTurn() {
-      const p = currentPlayer();
-      if (!p?.isAI || state.aiThinking) return;
-      if (state.phase === "main") {
-        setTimeout(() => runAiTurn(p.id), 150);
-      } else if (state.phase === "setup") {
-        setTimeout(() => runAiSetupPlacement(p.id), 150);
-      }
-    }
-
-    async function runAiSetupPlacement(pid) {
-      if (state.current !== pid || state.phase !== "setup") return;
-      state.aiThinking = true;
-      render();
-      await sleep(500);
-
-      if (state.pendingAction?.type === "settlement") {
-        const spots = eligibleSettlementSpots(pid);
-        // Score spots by adjacent token values
-        let bestSpot = spots[0];
-        let bestScore = -1;
-        spots.forEach(sid => {
-          const i = state.intersections[sid];
-          let score = 0;
-          i.adjHex.forEach(hid => {
-            const h = state.hexes[hid];
-            if (h.token) {
-              const pips = {2:1,3:2,4:3,5:4,6:5,8:5,9:4,10:3,11:2,12:1}[h.token] || 0;
-              score += pips;
-            }
-          });
-          if (score > bestScore) {
-            bestScore = score;
-            bestSpot = sid;
-          }
-        });
-
-        if (placeSettlement(pid, bestSpot, true)) {
-          log(`${currentPlayer().name} (AI) built setup settlement.`);
-          state.pendingAction = { type: "setup-road", fromInt: bestSpot };
-          render();
-          await sleep(500);
-
-          const edgeChoices = state.edges.filter(e => setupCanPlaceRoad(pid, e.id, bestSpot));
-          const edge = edgeChoices.sort((a, b) => (scoreIntersectionValue(b.a) + scoreIntersectionValue(b.b)) - (scoreIntersectionValue(a.a) + scoreIntersectionValue(a.b)))[0];
-          if (placeRoad(pid, edge.id, true)) {
-            log(`${currentPlayer().name} (AI) placed setup road.`);
-            state.aiThinking = false;
-            finishSetupPlacement(bestSpot);
-            render();
-          }
-        }
-      }
-    }
-
-    function bind() {
-      el("playerCount").addEventListener("change", updatePlayerTypeControls);
-      el("tradeGive").addEventListener("change", render);
-      el("newGameBtn").addEventListener("click", () => {
-        if (state.phase === "main") {
-          showModal("New Game?", "Are you sure you want to restart? Current progress will be lost.", "Yes, Restart", "No, Continue", () => startGame());
+        const ss=eligibleSettlementSpots(pid);
+        if(ss.length&&canAfford(p,COST.settlement)&&p.settlements>0){
+          const spot=level==="ai-easy"?ss[Math.floor(Math.random()*ss.length)]:[...ss].sort((a,b)=>scoreIntersectionValue(b)-scoreIntersectionValue(a))[0];
+          placeSettlement(pid,spot,false);log(`${p.name} (AI) built a settlement.`);acted=true;
         } else {
-          startGame();
-        }
-      });
-      el("rollBtn").addEventListener("click", rollDice);
-      el("endTurnBtn").addEventListener("click", endTurn);
-      el("cancelActionBtn").addEventListener("click", () => {
-        if (state.phase !== "main" || !state.pendingAction || state.pendingAction.type === "robber") return;
-        state.pendingAction = null;
-        log(`${currentPlayer().name} canceled pending action.`);
-        render();
-      });
-
-      el("buildRoadBtn").addEventListener("click", () => {
-        const p = currentPlayer();
-        if (!canAfford(p, COST.road)) return notify("Need brick + lumber.");
-        state.pendingAction = { type: "road", remaining: 1, free: false };
-        log(`${p.name} choose a legal edge for road.`);
-        render();
-      });
-      el("buildSettlementBtn").addEventListener("click", () => {
-        const p = currentPlayer();
-        if (!canAfford(p, COST.settlement)) return notify("Need brick+lumber+wool+grain.");
-        state.pendingAction = { type: "settlement", free: false };
-        log(`${p.name} choose legal intersection for settlement.`);
-        render();
-      });
-      el("buildCityBtn").addEventListener("click", () => {
-        const p = currentPlayer();
-        if (!canAfford(p, COST.city)) return notify("Need 2 grain + 3 ore.");
-        state.pendingAction = { type: "city" };
-        log(`${p.name} choose one of your settlements to upgrade.`);
-        render();
-      });
-      el("buyDevBtn").addEventListener("click", doBuyDev);
-      el("playKnightBtn").addEventListener("click", () => playDev("Knight"));
-      el("playRoadBuildBtn").addEventListener("click", () => playDev("Road Building"));
-      el("playYearBtn").addEventListener("click", () => playDev("Year of Plenty"));
-      el("playMonoBtn").addEventListener("click", () => playDev("Monopoly"));
-      el("bankTradeBtn").addEventListener("click", doBankTrade);
-      el("playerTradeBtn").addEventListener("click", doPlayerTrade);
-      el("closeModal").addEventListener("click", () => el("modal").classList.remove("open"));
-      el("passContinueBtn").addEventListener("click", () => {
-        el("passOverlay").classList.remove("open");
-        maybeRunAiTurn();
-      });
-      document.addEventListener("keydown", (e) => {
-        if (e.key.toLowerCase() === "r") el("rollBtn").click();
-        if (e.key.toLowerCase() === "e") el("endTurnBtn").click();
-        if (e.key === "Escape") {
-          if (el("passOverlay").classList.contains("open")) el("passOverlay").classList.remove("open");
-          else if (state.pendingAction && state.pendingAction.type !== "robber") {
-            state.pendingAction = null;
-            render();
+          const re=eligibleRoadEdges(pid);
+          if(re.length&&canAfford(p,COST.road)&&p.roads>0){
+            const ep=level==="ai-easy"?re[Math.floor(Math.random()*re.length)]:chooseBestRoadEdge(pid,re);
+            placeRoad(pid,ep,false);log(`${p.name} (AI) built a road.`);acted=true;
+          } else if(canAfford(p,COST.dev)&&state.devDeck.length){
+            doBuyDev();acted=true;
           }
         }
-      });
+      }
+      checkWin();render();
+      if(!acted)break;
+      await sleep(260);
     }
+    const pk2=p.dev.find(c=>c.type==="Knight"&&isDevPlayable(c,pid));
+    if(level==="ai-normal"&&pk2&&!state.pendingAction){
+      playDev("Knight");await sleep(250);
+      if(state.pendingAction?.type==="robber"){moveRobber(aiChooseRobberHex(pid),pid);state.pendingAction=null;render();await sleep(220);}
+    }
+    if(state.phase==="main"&&state.current===pid&&!state.pendingAction&&state.diceRolled){
+      state.aiThinking=false;render();endTurn();
+    } else {state.aiThinking=false;render();}
+  }
 
-    function init() {
-      state.svg = el("boardSvg");
-      bind();
-      updatePlayerTypeControls();
-      if (!loadGame()) {
-        el("modal").classList.add("open");
-        startGame();
-      } else {
-        log("Welcome back! Game loaded from local storage.");
+  function maybeRunAiTurn(){
+    const p=currentPlayer();
+    if(!p?.isAI||state.aiThinking)return;
+    if(state.phase==="main")setTimeout(()=>runAiTurn(p.id),150);
+    else if(state.phase==="setup")setTimeout(()=>runAiSetupPlacement(p.id),150);
+  }
+
+  async function runAiSetupPlacement(pid){
+    if(state.current!==pid||state.phase!=="setup")return;
+    state.aiThinking=true;render();await sleep(500);
+    if(state.pendingAction?.type==="settlement"){
+      const spots=eligibleSettlementSpots(pid);
+      let bestSpot=spots[0],bestScore=-1;
+      spots.forEach(sid=>{
+        const i=state.intersections[sid];let score=0;
+        i.adjHex.forEach(hid=>{const h=state.hexes[hid];if(h.token){const p={2:1,3:2,4:3,5:4,6:5,8:5,9:4,10:3,11:2,12:1}[h.token]||0;score+=p;}});
+        if(score>bestScore){bestScore=score;bestSpot=sid;}
+      });
+      if(placeSettlement(pid,bestSpot,true)){
+        log(`${currentPlayer().name} (AI) placed setup settlement.`);
+        state.pendingAction={type:"setup-road",fromInt:bestSpot};render();await sleep(500);
+        const ec=state.edges.filter(e=>setupCanPlaceRoad(pid,e.id,bestSpot));
+        const edge=ec.sort((a,b)=>(scoreIntersectionValue(b.a)+scoreIntersectionValue(b.b))-(scoreIntersectionValue(a.a)+scoreIntersectionValue(a.b)))[0];
+        if(placeRoad(pid,edge.id,true)){
+          log(`${currentPlayer().name} (AI) placed setup road.`);
+          state.aiThinking=false;finishSetupPlacement(bestSpot);render();
+        }
       }
     }
+  }
 
-    init();
-  </script>
+  /* ═══════════════════════════════════════════════════
+     PLAYER TYPE CONFIG
+  ═══════════════════════════════════════════════════ */
+  function updatePlayerTypeControls(){
+    const n=Number($("playerCount").value);
+    const wrap=$("playerTypeConfig"),namesWrap=$("playerNameConfig");
+    const existing=[...wrap.querySelectorAll("select")].map(s=>s.value);
+    const existingNames=[...namesWrap.querySelectorAll("input")].map(i=>i.value);
+    wrap.innerHTML="";namesWrap.innerHTML="";
+    for(let i=0;i<n;i++){
+      const label=document.createElement("label");
+      label.textContent=`P${i+1}`;
+      const sel=document.createElement("select");
+      sel.className="player-type-select";
+      sel.innerHTML=`<option value="human">Human</option><option value="ai-easy">AI Easy</option><option value="ai-normal">AI Normal</option><option value="ai-hard">AI Hard</option>`;
+      sel.value=existing[i]||"human";
+      wrap.appendChild(label);wrap.appendChild(sel);
+
+      const nl=document.createElement("label");nl.textContent=`Name ${i+1}`;
+      const ni=document.createElement("input");ni.className="player-name-input";
+      ni.value=existingNames[i]||`Player ${i+1}`;ni.style.width="90px";
+      namesWrap.appendChild(nl);namesWrap.appendChild(ni);
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════
+     EVENT BINDING
+  ═══════════════════════════════════════════════════ */
+  function bind(){
+    // Tabs
+    document.querySelectorAll(".tab-btn").forEach(btn=>{
+      btn.addEventListener("click",()=>{
+        activeTab=btn.dataset.tab;
+        document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+        document.querySelectorAll(".tab-panel").forEach(p=>p.classList.remove("active"));
+        btn.classList.add("active");
+        $(`tab-${activeTab}`).classList.add("active");
+      });
+    });
+
+    $("playerCount").addEventListener("change",updatePlayerTypeControls);
+    $("tradeGive").addEventListener("change",render);
+
+    $("newGameBtn").addEventListener("click",()=>{
+      if(state.phase==="main"){
+        showModal("New Game?","<p style='color:var(--ink-muted)'>Restart? Current progress will be lost.</p>","Yes, Restart","Keep Playing",()=>startGame());
+      } else startGame();
+    });
+
+    $("rollBtn").addEventListener("click",rollDice);
+    $("endTurnBtn").addEventListener("click",endTurn);
+    $("cancelActionBtn").addEventListener("click",()=>{
+      if(state.phase!=="main"||!state.pendingAction||state.pendingAction.type==="robber")return;
+      state.pendingAction=null;log(`${currentPlayer().name} canceled.`);render();
+    });
+
+    $("buildRoadBtn").addEventListener("click",()=>{
+      const p=currentPlayer();
+      if(!canAfford(p,COST.road))return toast("Need 🧱+🪵 to build a road.");
+      state.pendingAction={type:"road",remaining:1,free:false};
+      log(`${p.name}: click a valid edge.`);render();
+    });
+    $("buildSettlementBtn").addEventListener("click",()=>{
+      const p=currentPlayer();
+      if(!canAfford(p,COST.settlement))return toast("Need 🧱🪵🐑🌾 for a settlement.");
+      state.pendingAction={type:"settlement",free:false};
+      log(`${p.name}: click a valid intersection.`);render();
+    });
+    $("buildCityBtn").addEventListener("click",()=>{
+      const p=currentPlayer();
+      if(!canAfford(p,COST.city))return toast("Need 🌾🌾+⛏⛏⛏ for a city.");
+      state.pendingAction={type:"city"};
+      log(`${p.name}: click your settlement to upgrade.`);render();
+    });
+    $("buyDevBtn").addEventListener("click",doBuyDev);
+    $("playKnightBtn").addEventListener("click",()=>playDev("Knight"));
+    $("playRoadBuildBtn").addEventListener("click",()=>playDev("Road Building"));
+    $("playYearBtn").addEventListener("click",()=>playDev("Year of Plenty"));
+    $("playMonoBtn").addEventListener("click",()=>playDev("Monopoly"));
+    $("bankTradeBtn").addEventListener("click",doBankTrade);
+    $("playerTradeBtn").addEventListener("click",doPlayerTrade);
+    $("closeModal").addEventListener("click",()=>$("modal").classList.remove("open"));
+    $("passContinueBtn").addEventListener("click",()=>{
+      $("passOverlay").classList.remove("open");maybeRunAiTurn();
+    });
+
+    document.addEventListener("keydown",e=>{
+      const k=e.key.toLowerCase();
+      if(k==="r")$("rollBtn").click();
+      if(k==="e")$("endTurnBtn").click();
+      if(e.key==="Escape"){
+        if($("passOverlay").classList.contains("open"))$("passOverlay").classList.remove("open");
+        else if($("modal").classList.contains("open"))$("modal").classList.remove("open");
+        else if(state.pendingAction&&state.pendingAction.type!=="robber"){state.pendingAction=null;render();}
+      }
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════
+     INIT
+  ═══════════════════════════════════════════════════ */
+  function init(){
+    state.svg=$("boardSvg");
+    bind();
+    updatePlayerTypeControls();
+    renderDieFace($("dieSvg1"),1,false);
+    renderDieFace($("dieSvg2"),1,false);
+    if(!loadGame()){
+      showModal(
+        "Welcome to Catan",
+        `<p style="color:var(--ink-muted);line-height:1.6;margin-bottom:10px;">Collect resources, build roads and settlements, and race to 10 Victory Points.</p>
+         <p style="color:var(--ink-muted);line-height:1.6;">Configure players above, then click <strong>New Game</strong> — or just start here.</p>`,
+        "Start Game","",()=>startGame()
+      );
+      startGame();
+    } else {
+      log("Welcome back! Game loaded from storage.");
+      toast("♻️ Game restored from last session.");
+    }
+  }
+
+  init();
+</script>
 </body>
-</html>
+  </html>
