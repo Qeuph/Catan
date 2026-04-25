@@ -217,6 +217,7 @@
           </select>
           <button id="newGameBtn" class="primary">New Game</button>
         </div>
+        <div id="playerTypeConfig" class="row" style="margin-top:10px;"></div>
         <div class="legend">
           Setup flow: each player places a settlement and an adjacent road in order, then reverse order for second placement.
         </div>
@@ -244,7 +245,9 @@
         <div class="row">
           <button id="playMonoBtn">Play Monopoly</button>
           <button id="endTurnBtn" class="primary">End Turn</button>
+          <button id="cancelActionBtn">Cancel Action</button>
         </div>
+        <div id="actionHint" class="legend">Action: none</div>
         <div class="legend">
           Click highlighted edges/intersections/hexes to complete selected action.
         </div>
@@ -330,7 +333,8 @@
       turn: 1,
       bank: { brick: 19, lumber: 19, wool: 19, grain: 19, ore: 19 },
       largestArmyOwner: null,
-      longestRoadOwner: null
+      longestRoadOwner: null,
+      aiThinking: false
     };
 
     const el = (id) => document.getElementById(id);
@@ -347,6 +351,20 @@
         [a[i], a[j]] = [a[j], a[i]];
       }
       return a;
+    }
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function isAdjacentHex(a, b) {
+      const dq = a.q - b.q;
+      const dr = a.r - b.r;
+      return (
+        (dq === 1 && dr === 0) || (dq === -1 && dr === 0) ||
+        (dq === 0 && dr === 1) || (dq === 0 && dr === -1) ||
+        (dq === 1 && dr === -1) || (dq === -1 && dr === 1)
+      );
     }
 
     function mkBoard() {
@@ -367,13 +385,28 @@
         "desert"
       ]);
 
-      const numbers = shuffle([2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12]);
+      const numbersPool = [2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12];
 
       state.hexes = coords.map((c, i) => {
         const res = resources[i];
-        const token = res === "desert" ? null : numbers.pop();
-        return { id: i, q: c.q, r: c.r, resource: res, token, robber: res === "desert" };
+        return { id: i, q: c.q, r: c.r, resource: res, token: null, robber: res === "desert" };
       });
+      const numberedHexes = state.hexes.filter(h => h.resource !== "desert");
+
+      let assigned = false;
+      for (let attempt = 0; attempt < 600 && !assigned; attempt++) {
+        const candidate = shuffle([...numbersPool]);
+        numberedHexes.forEach((h, idx) => h.token = candidate[idx]);
+        const ok = numberedHexes.every(h => {
+          if (h.token !== 6 && h.token !== 8) return true;
+          return !numberedHexes.some(o => o.id !== h.id && (o.token === 6 || o.token === 8) && isAdjacentHex(h, o));
+        });
+        if (ok) assigned = true;
+      }
+      if (!assigned) {
+        const fallback = shuffle([...numbersPool]);
+        numberedHexes.forEach((h, idx) => h.token = fallback[idx]);
+      }
       state.robberHex = state.hexes.find(h => h.robber).id;
     }
 
@@ -438,10 +471,13 @@
     }
 
     function makePlayers(n) {
+      const types = [...document.querySelectorAll(".player-type-select")];
       state.players = Array.from({ length: n }, (_, i) => ({
         id: i,
         name: `Player ${i+1}`,
         color: P_COLORS[i],
+        isAI: (types[i]?.value || "human") !== "human",
+        aiLevel: types[i]?.value || "human",
         resources: { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 },
         roads: 15,
         settlements: 5,
@@ -463,6 +499,10 @@
     }
 
     function currentPlayer() { return state.players[state.current]; }
+
+    function isDevPlayable(card, playerId) {
+      return card.boughtTurn < state.turn || card.boughtBy !== playerId;
+    }
 
     function canAfford(player, cost) {
       return Object.entries(cost).every(([r,v]) => player.resources[r] >= v);
@@ -681,6 +721,10 @@
       }).map(i => i.id);
     }
 
+    function eligibleCitySpots(pid) {
+      return state.intersections.filter(i => i.owner === pid && i.type === "settlement").map(i => i.id);
+    }
+
     function renderBoard() {
       const svg = state.svg;
       svg.innerHTML = "";
@@ -710,6 +754,7 @@
         svg.appendChild(lbl);
 
         if (h.token !== null) {
+          const pipsMap = {2:1,3:2,4:3,5:4,6:5,8:5,9:4,10:3,11:2,12:1};
           const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
           c.setAttribute("cx", h.cx);
           c.setAttribute("cy", h.cy);
@@ -727,6 +772,17 @@
           t.setAttribute("fill", (h.token === 6 || h.token === 8) ? "#b00020" : "#111");
           t.textContent = h.token;
           svg.appendChild(t);
+
+          const pips = pipsMap[h.token] || 0;
+          const start = h.cx - ((pips - 1) * 7) / 2;
+          for (let p = 0; p < pips; p++) {
+            const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            dot.setAttribute("cx", start + p * 7);
+            dot.setAttribute("cy", h.cy + 16);
+            dot.setAttribute("r", "2.2");
+            dot.setAttribute("fill", (h.token === 6 || h.token === 8) ? "#b00020" : "#333");
+            svg.appendChild(dot);
+          }
         }
 
         if (h.robber) {
@@ -766,22 +822,23 @@
       });
 
       const activeSet = state.pendingAction?.type === "settlement" ? eligibleSettlementSpots(state.current) : [];
-      const activeCity = state.pendingAction?.type === "city";
+      const activeCity = state.pendingAction?.type === "city" ? eligibleCitySpots(state.current) : [];
 
       state.intersections.forEach(i => {
         const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         c.setAttribute("cx", i.x);
         c.setAttribute("cy", i.y);
-        c.setAttribute("r", i.owner === null ? (activeSet.includes(i.id) || (activeCity && i.owner===state.current) ? 8 : 5) : (i.type === "city" ? 12 : 9));
+        c.setAttribute("r", i.owner === null ? (activeSet.includes(i.id) ? 8 : 5) : (i.type === "city" ? 12 : 9));
 
         let fill = "#dbe4ea";
         if (i.owner !== null) fill = state.players[i.owner].color;
         else if (activeSet.includes(i.id)) fill = "#ffd166";
+        if (activeCity.includes(i.id)) fill = "#ffe66d";
 
         c.setAttribute("fill", fill);
         c.setAttribute("stroke", "rgba(0,0,0,.4)");
         c.setAttribute("stroke-width", "2");
-        c.style.cursor = (activeSet.includes(i.id) || (activeCity && i.owner===state.current && i.type==="settlement")) ? "pointer" : "default";
+        c.style.cursor = (activeSet.includes(i.id) || activeCity.includes(i.id)) ? "pointer" : "default";
 
         c.addEventListener("click", () => {
           if (state.pendingAction?.type === "settlement" && activeSet.includes(i.id)) {
@@ -837,9 +894,46 @@
       to.innerHTML = state.players.map((p,i)=>`<option value="${i}">${p.name}</option>`).join("");
     }
 
+    function actionHintText() {
+      if (state.phase === "setup") {
+        if (state.pendingAction?.type === "settlement") return "Setup: place settlement.";
+        if (state.pendingAction?.type === "setup-road") return "Setup: place adjacent road.";
+      }
+      if (!state.pendingAction) return "Action: none";
+      const t = state.pendingAction.type;
+      if (t === "road") return `Building road (${state.pendingAction.remaining} left).`;
+      if (t === "settlement") return "Choose legal settlement location.";
+      if (t === "city") return "Choose your settlement to upgrade.";
+      if (t === "robber") return "Select a hex for robber movement.";
+      if (t === "setup-road") return "Setup: place adjacent road.";
+      return `Action: ${t}`;
+    }
+
+    function updatePlayerTypeControls() {
+      const n = Number(el("playerCount").value);
+      const wrap = el("playerTypeConfig");
+      const existing = [...wrap.querySelectorAll("select")].map(s => s.value);
+      wrap.innerHTML = "";
+      for (let i = 0; i < n; i++) {
+        const label = document.createElement("label");
+        label.textContent = `P${i + 1}`;
+        const sel = document.createElement("select");
+        sel.className = "player-type-select";
+        sel.innerHTML = `
+          <option value="human">Human</option>
+          <option value="ai-easy">AI Easy</option>
+          <option value="ai-normal">AI Normal</option>
+        `;
+        sel.value = existing[i] || "human";
+        wrap.appendChild(label);
+        wrap.appendChild(sel);
+      }
+    }
+
     function renderPanels() {
       el("phasePill").textContent = state.phase === "setup" ? `Setup ${state.setupStep+1}/${state.setupOrder.length}` : `Main - Round ${state.turn}`;
       el("turnPill").textContent = `Turn: ${currentPlayer().name}`;
+      el("actionHint").textContent = actionHintText();
 
       const panel = el("playersPanel");
       panel.innerHTML = "";
@@ -851,13 +945,13 @@
         div.style.borderLeftColor = p.color;
         div.innerHTML = `
           <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
-            <strong>${p.name}</strong><span class="pill">VP: ${vp}</span>
+            <strong>${p.name}${p.isAI ? ` (${p.aiLevel === "ai-normal" ? "AI Normal" : "AI Easy"})` : ""}</strong><span class="pill">VP: ${vp}</span>
           </div>
           <div style="margin-top:4px; font-size:12px; color:var(--muted)">
             Roads ${15-p.roads}/15 · Settlements ${5-p.settlements}/5 · Cities ${4-p.cities}/4 · Cards ${totalCards}
           </div>
           <div style="margin-top:4px; font-size:12px; color:var(--muted)">
-            Dev: ${p.dev.join(", ") || "none"} · Knights played: ${p.knightsPlayed}
+            Dev: ${p.dev.map(c => c.type).join(", ") || "none"} · Knights played: ${p.knightsPlayed}
           </div>
           <div class="resources">
             ${RES.map(r=>`<div class="resource">${r}: ${p.resources[r]}</div>`).join("")}
@@ -867,11 +961,18 @@
       });
 
       const isMain = state.phase === "main";
-      el("rollBtn").disabled = !isMain || state.diceRolled;
-      el("endTurnBtn").disabled = !isMain || !state.diceRolled || state.pendingAction !== null;
-      ["buildRoadBtn","buildSettlementBtn","buildCityBtn","buyDevBtn","playKnightBtn","playRoadBuildBtn","playYearBtn","playMonoBtn","bankTradeBtn","playerTradeBtn"].forEach(id => {
-        el(id).disabled = !isMain || !state.diceRolled || state.pendingAction !== null;
+      const p = currentPlayer();
+      const hasPlayable = (name) => p.dev.some(c => c.type === name && isDevPlayable(c, p.id));
+      el("rollBtn").disabled = !isMain || state.diceRolled || state.aiThinking;
+      el("endTurnBtn").disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking;
+      ["buildRoadBtn","buildSettlementBtn","buildCityBtn","buyDevBtn","bankTradeBtn","playerTradeBtn"].forEach(id => {
+        el(id).disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking;
       });
+      el("playKnightBtn").disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking || !hasPlayable("Knight");
+      el("playRoadBuildBtn").disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking || !hasPlayable("Road Building");
+      el("playYearBtn").disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking || !hasPlayable("Year of Plenty");
+      el("playMonoBtn").disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking || !hasPlayable("Monopoly");
+      el("cancelActionBtn").disabled = !(state.phase === "main" && state.pendingAction && state.pendingAction.type !== "robber");
     }
 
     function render() {
@@ -898,6 +999,7 @@
         state.pendingAction = null;
         state.diceRolled = false;
         log(`Setup complete. ${currentPlayer().name} begins turn 1.`);
+        maybeRunAiTurn();
       } else {
         state.current = state.setupOrder[state.setupStep];
         state.pendingAction = { type: "settlement", free: true };
@@ -923,11 +1025,13 @@
       state.bank = { brick: 19, lumber: 19, wool: 19, grain: 19, ore: 19 };
       state.largestArmyOwner = null;
       state.longestRoadOwner = null;
+      state.aiThinking = false;
       logBox.innerHTML = "";
       log("New game started.");
       log(`${currentPlayer().name}: place your first settlement.`);
       fillSelectors();
       render();
+      maybeRunAiTurn();
     }
 
     function endTurn() {
@@ -938,6 +1042,7 @@
       el("diceResult").textContent = "Dice: —";
       log(`Turn passes to ${currentPlayer().name}.`);
       render();
+      maybeRunAiTurn();
     }
 
     function chooseResource(promptText) {
@@ -957,7 +1062,7 @@
         p.vpCards++;
         log(`${p.name} bought a hidden Victory Point card.`);
       } else {
-        p.dev.push(card);
+        p.dev.push({ type: card, boughtTurn: state.turn, boughtBy: p.id });
         log(`${p.name} bought development card: ${card}.`);
       }
       checkWin();
@@ -966,7 +1071,7 @@
 
     function playDev(cardName) {
       const p = currentPlayer();
-      const idx = p.dev.indexOf(cardName);
+      const idx = p.dev.findIndex(c => c.type === cardName && isDevPlayable(c, p.id));
       if (idx < 0) return alert(`No ${cardName} card available.`);
       p.dev.splice(idx, 1);
 
@@ -1042,10 +1147,120 @@
       }
     }
 
+    function aiChooseRobberHex(pid) {
+      let best = null;
+      let bestScore = -999;
+      state.hexes.forEach(h => {
+        if (h.id === state.robberHex) return;
+        let score = 0;
+        state.intersections.forEach(i => {
+          if (!i.adjHex.includes(h.id) || i.owner === null) return;
+          if (i.owner === pid) score -= (i.type === "city" ? 4 : 2);
+          else {
+            const cards = RES.reduce((s, r) => s + state.players[i.owner].resources[r], 0);
+            score += (i.type === "city" ? 3 : 2) + cards * 0.05;
+          }
+        });
+        if (score > bestScore) {
+          bestScore = score;
+          best = h.id;
+        }
+      });
+      return best ?? state.robberHex;
+    }
+
+    async function runAiTurn(pid) {
+      if (state.current !== pid || state.phase !== "main") return;
+      const p = currentPlayer();
+      if (!p.isAI) return;
+      state.aiThinking = true;
+      render();
+      await sleep(350);
+
+      if (!state.diceRolled) rollDice();
+      await sleep(350);
+
+      if (state.pendingAction?.type === "robber") {
+        moveRobber(aiChooseRobberHex(pid), pid);
+        state.pendingAction = null;
+        render();
+        await sleep(250);
+      }
+
+      const level = p.aiLevel || "ai-easy";
+      const maxBuildLoops = level === "ai-normal" ? 4 : 2;
+      for (let i = 0; i < maxBuildLoops; i++) {
+        let acted = false;
+
+        const citySpots = eligibleCitySpots(pid);
+        if (citySpots.length && canAfford(p, COST.city)) {
+          upgradeCity(pid, citySpots[Math.floor(Math.random() * citySpots.length)]);
+          log(`${p.name} (AI) upgraded a city.`);
+          acted = true;
+        } else {
+          const setSpots = eligibleSettlementSpots(pid);
+          if (setSpots.length && canAfford(p, COST.settlement) && p.settlements > 0) {
+            placeSettlement(pid, setSpots[Math.floor(Math.random() * setSpots.length)], false);
+            log(`${p.name} (AI) built a settlement.`);
+            acted = true;
+          } else {
+            const roadEdges = eligibleRoadEdges(pid);
+            if (roadEdges.length && canAfford(p, COST.road) && p.roads > 0) {
+              placeRoad(pid, roadEdges[Math.floor(Math.random() * roadEdges.length)], false);
+              log(`${p.name} (AI) built a road.`);
+              acted = true;
+            } else if (canAfford(p, COST.dev) && state.devDeck.length) {
+              doBuyDev();
+              acted = true;
+            }
+          }
+        }
+
+        checkWin();
+        render();
+        if (!acted) break;
+        await sleep(260);
+      }
+
+      const playableKnight = p.dev.find(c => c.type === "Knight" && isDevPlayable(c, pid));
+      if (level === "ai-normal" && playableKnight && !state.pendingAction) {
+        playDev("Knight");
+        await sleep(250);
+        if (state.pendingAction?.type === "robber") {
+          moveRobber(aiChooseRobberHex(pid), pid);
+          state.pendingAction = null;
+          render();
+          await sleep(220);
+        }
+      }
+
+      if (state.phase === "main" && state.current === pid && !state.pendingAction && state.diceRolled) {
+        state.aiThinking = false;
+        render();
+        endTurn();
+      } else {
+        state.aiThinking = false;
+        render();
+      }
+    }
+
+    function maybeRunAiTurn() {
+      const p = currentPlayer();
+      if (state.phase !== "main" || !p?.isAI || state.aiThinking) return;
+      setTimeout(() => runAiTurn(p.id), 150);
+    }
+
     function bind() {
+      el("playerCount").addEventListener("change", updatePlayerTypeControls);
       el("newGameBtn").addEventListener("click", startGame);
       el("rollBtn").addEventListener("click", rollDice);
       el("endTurnBtn").addEventListener("click", endTurn);
+      el("cancelActionBtn").addEventListener("click", () => {
+        if (state.phase !== "main" || !state.pendingAction || state.pendingAction.type === "robber") return;
+        state.pendingAction = null;
+        log(`${currentPlayer().name} canceled pending action.`);
+        render();
+      });
 
       el("buildRoadBtn").addEventListener("click", () => {
         const p = currentPlayer();
@@ -1081,6 +1296,7 @@
     function init() {
       state.svg = el("boardSvg");
       bind();
+      updatePlayerTypeControls();
       el("modal").classList.add("open");
       startGame();
     }
