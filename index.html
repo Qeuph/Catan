@@ -207,6 +207,31 @@
       fill: rgba(0,0,0,.6);
       pointer-events: none;
     }
+    #diceResult.rolling { animation: diceRoll .45s ease; }
+    @keyframes diceRoll {
+      0% { transform: rotateX(0deg) scale(1); }
+      50% { transform: rotateX(180deg) scale(1.12); }
+      100% { transform: rotateX(360deg) scale(1); }
+    }
+    .pass-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      background: rgba(0,0,0,.82);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+    }
+    .pass-overlay.open { display: flex; }
+    .pass-overlay h2 { font-size: 32px; margin-bottom: 10px; }
+    .pass-overlay p { color: var(--muted); margin-bottom: 16px; }
+    @media (max-width: 1100px) {
+      .wrap { grid-template-columns: 1fr; }
+      #boardSvg { min-height: 420px; height: 62vh; }
+      .side { max-height: none; }
+    }
   </style>
 </head>
 <body>
@@ -220,6 +245,7 @@
         <div class="row">
           <span id="phasePill" class="pill">Setup</span>
           <span id="turnPill" class="pill">Turn: —</span>
+          <span id="subturnPill" class="pill">Status: —</span>
         </div>
       </div>
       <svg id="boardSvg" viewBox="0 0 1200 900"></svg>
@@ -238,6 +264,7 @@
           <button id="newGameBtn" class="primary">New Game</button>
         </div>
         <div id="playerTypeConfig" class="row" style="margin-top:10px;"></div>
+        <div id="playerNameConfig" class="row" style="margin-top:10px;"></div>
         <div class="legend">
           Setup flow: each player places a settlement and an adjacent road in order, then reverse order for second placement.
         </div>
@@ -257,7 +284,7 @@
           <button id="buildCityBtn">Build City (2 grain, 3 ore)</button>
           <button id="buyDevBtn">Buy Dev Card (w/g/o)</button>
         </div>
-        <div class="row">
+        <div id="devCardButtons" class="row">
           <button id="playKnightBtn">Play Knight</button>
           <button id="playRoadBuildBtn">Play Road Building</button>
           <button id="playYearBtn">Play Year of Plenty</button>
@@ -278,13 +305,15 @@
         <div class="row">
           <label>Give</label><select id="tradeGive"></select>
           <label>Get</label><select id="tradeGet"></select>
-          <button id="bankTradeBtn">Bank Trade 4:1</button>
+          <button id="bankTradeBtn">Bank Trade</button>
         </div>
         <div class="row">
           <label>To</label><select id="offerTo"></select>
-          <label>Offer</label><select id="offerGive"></select>
-          <label>For</label><select id="offerWant"></select>
-          <button id="playerTradeBtn">Offer 1:1</button>
+          <label>Offer</label><input id="offerGiveQty" type="number" min="1" value="1" />
+          <select id="offerGive"></select>
+          <label>For</label><input id="offerWantQty" type="number" min="1" value="1" />
+          <select id="offerWant"></select>
+          <button id="playerTradeBtn">Offer Trade</button>
         </div>
       </section>
 
@@ -316,6 +345,13 @@
         <button id="modalSecondaryBtn" style="display:none;"></button>
         <button id="closeModal" class="primary">Start / Continue</button>
       </div>
+    </div>
+  </div>
+  <div id="passOverlay" class="pass-overlay">
+    <div class="card">
+      <h2 id="passTitle">Pass device</h2>
+      <p id="passBody">Next player's turn.</p>
+      <button id="passContinueBtn" class="primary">Continue</button>
     </div>
   </div>
 
@@ -365,7 +401,8 @@
       longestRoadOwner: null,
       aiThinking: false,
       devCardPlayedThisTurn: false,
-      discardQueue: []
+      discardQueue: [],
+      renderQueued: false
     };
 
     const el = (id) => document.getElementById(id);
@@ -501,11 +538,27 @@
       });
     }
 
+    function assignPorts() {
+      const coastal = state.intersections.filter(i => i.adjHex.length < 3).map(i => i.id);
+      coastal.forEach(id => state.intersections[id].port = null);
+      const genericCount = Math.min(4, Math.floor(coastal.length / 5));
+      const specialTypes = shuffle([...RES]).slice(0, Math.min(5, coastal.length - genericCount));
+      const pool = shuffle([...coastal]);
+      for (let i = 0; i < genericCount && pool.length; i++) {
+        state.intersections[pool.pop()].port = { ratio: 3, resource: null };
+      }
+      specialTypes.forEach(r => {
+        if (!pool.length) return;
+        state.intersections[pool.pop()].port = { ratio: 2, resource: r };
+      });
+    }
+
     function makePlayers(n) {
       const types = [...document.querySelectorAll(".player-type-select")];
+      const names = [...document.querySelectorAll(".player-name-input")];
       state.players = Array.from({ length: n }, (_, i) => ({
         id: i,
-        name: `Player ${i+1}`,
+        name: names[i]?.value?.trim() || `Player ${i+1}`,
         color: P_COLORS[i],
         isAI: (types[i]?.value || "human") !== "human",
         aiLevel: types[i]?.value || "human",
@@ -547,9 +600,16 @@
 
     function giveResource(player, res, n=1) {
       if (state.bank[res] < n) n = state.bank[res];
-      if (n <= 0) return;
+      if (n <= 0) {
+        log(`Bank of ${res} is depleted.`);
+        return;
+      }
       player.resources[res] += n;
       state.bank[res] -= n;
+    }
+
+    function notify(message, title = "Notice") {
+      showModal(title, `<p style="color:var(--muted);">${message}</p>`, "OK");
     }
 
     function placeRoad(playerId, edgeId, free=false) {
@@ -687,6 +747,9 @@
       const d1 = 1 + Math.floor(Math.random() * 6);
       const d2 = 1 + Math.floor(Math.random() * 6);
       const total = d1 + d2;
+      el("diceResult").classList.remove("rolling");
+      requestAnimationFrame(() => el("diceResult").classList.add("rolling"));
+      setTimeout(() => el("diceResult").classList.remove("rolling"), 500);
       el("diceResult").textContent = `Dice: ${d1} + ${d2} = ${total}`;
       state.diceRolled = true;
       log(`${currentPlayer().name} rolled ${total}.`);
@@ -801,6 +864,16 @@
       return state.intersections.filter(i => i.owner === pid && i.type === "settlement").map(i => i.id);
     }
 
+    function getBestTradeRate(pid, giveRes) {
+      let rate = 4;
+      state.intersections.forEach(i => {
+        if (i.owner !== pid || !i.port) return;
+        if (i.port.resource === null) rate = Math.min(rate, 3);
+        if (i.port.resource === giveRes) rate = Math.min(rate, 2);
+      });
+      return rate;
+    }
+
     function saveGame() {
       try {
         const data = JSON.stringify(state, (key, value) => {
@@ -820,6 +893,7 @@
         const saved = JSON.parse(data);
         Object.assign(state, saved);
         state.svg = el("boardSvg");
+        if (!state.intersections?.some(i => i.port)) assignPorts();
         // Re-calculate derived values or fix object references if needed
         render();
         return true;
@@ -865,8 +939,13 @@
         poly.setAttribute("stroke", "var(--hex-stroke)");
         poly.setAttribute("stroke-width", "2");
         poly.style.cursor = state.pendingAction?.type === "robber" ? "pointer" : "default";
+        poly.setAttribute("title", `${h.resource}${h.token ? ` • token ${h.token}` : ""}`);
         poly.addEventListener("click", () => {
           if (state.pendingAction?.type === "robber") {
+            if (h.id === state.robberHex) {
+              notify("You must move the robber to a different hex.");
+              return;
+            }
             moveRobber(h.id, state.current);
             state.pendingAction = null;
             render();
@@ -876,7 +955,7 @@
 
         const lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
         lbl.setAttribute("x", h.cx);
-        lbl.setAttribute("y", h.cy + 45);
+        lbl.setAttribute("y", h.cy + 60);
         lbl.setAttribute("text-anchor", "middle");
         lbl.setAttribute("class", "hex-label");
         lbl.textContent = h.resource;
@@ -977,6 +1056,11 @@
         node.setAttribute("fill", fill);
         node.setAttribute("stroke", "rgba(0,0,0,.4)");
         node.setAttribute("stroke-width", "2");
+        if (i.owner !== null) {
+          node.setAttribute("title", `${state.players[i.owner].name} • ${i.type}`);
+        } else if (i.port) {
+          node.setAttribute("title", i.port.resource ? `${i.port.ratio}:1 ${i.port.resource} port` : "3:1 generic port");
+        }
         node.style.cursor = (activeSet.includes(i.id) || activeCity.includes(i.id)) ? "pointer" : "default";
 
         node.addEventListener("click", () => {
@@ -1001,6 +1085,16 @@
           }
         });
         svg.appendChild(node);
+
+        if (i.port) {
+          const portText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          portText.setAttribute("x", i.x + 10);
+          portText.setAttribute("y", i.y - 10);
+          portText.setAttribute("font-size", "10");
+          portText.setAttribute("fill", "#f5d77f");
+          portText.textContent = i.port.resource ? `${i.port.ratio}:1 ${RES_ICONS[i.port.resource]}` : "3:1";
+          svg.appendChild(portText);
+        }
 
         if (state.pendingAction?.type === "setup-road") {
           const edgeChoices = state.edges.filter(e => setupCanPlaceRoad(state.current, e.id, state.pendingAction.fromInt));
@@ -1053,8 +1147,11 @@
     function updatePlayerTypeControls() {
       const n = Number(el("playerCount").value);
       const wrap = el("playerTypeConfig");
+      const namesWrap = el("playerNameConfig");
       const existing = [...wrap.querySelectorAll("select")].map(s => s.value);
+      const existingNames = [...namesWrap.querySelectorAll("input")].map(i => i.value);
       wrap.innerHTML = "";
+      namesWrap.innerHTML = "";
       for (let i = 0; i < n; i++) {
         const label = document.createElement("label");
         label.textContent = `P${i + 1}`;
@@ -1064,10 +1161,19 @@
           <option value="human">Human</option>
           <option value="ai-easy">AI Easy</option>
           <option value="ai-normal">AI Normal</option>
+          <option value="ai-hard">AI Hard</option>
         `;
         sel.value = existing[i] || "human";
         wrap.appendChild(label);
         wrap.appendChild(sel);
+
+        const nameLabel = document.createElement("label");
+        nameLabel.textContent = `Name ${i + 1}`;
+        const nameInput = document.createElement("input");
+        nameInput.className = "player-name-input";
+        nameInput.value = existingNames[i] || `Player ${i + 1}`;
+        namesWrap.appendChild(nameLabel);
+        namesWrap.appendChild(nameInput);
       }
     }
 
@@ -1093,6 +1199,8 @@
 
       el("phasePill").textContent = state.phase === "setup" ? `Setup ${state.setupStep+1}/${state.setupOrder.length}` : `Main - Round ${state.turn}`;
       el("turnPill").textContent = `Turn: ${currentPlayer().name}`;
+      const status = state.phase === "setup" ? "Status: Setup" : (!state.diceRolled ? "Status: Need Roll" : "Status: Build/Trade");
+      el("subturnPill").textContent = status;
       el("actionHint").textContent = actionHintText();
 
       const panel = el("playersPanel");
@@ -1119,12 +1227,12 @@
 
         const isCurrent = (i === state.current);
         const devDisplay = isCurrent
-          ? (p.dev.map(c => c.type).join(", ") || "none")
+          ? (p.dev.length ? `${p.dev.length} playable / hidden dev cards` : "none")
           : (p.dev.length > 0 ? `${p.dev.length} cards` : "none");
 
         div.innerHTML = `
           <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
-            <strong>${p.name}${p.isAI ? ` (${p.aiLevel === "ai-normal" ? "AI Normal" : "AI Easy"})` : ""} ${badges}</strong><span class="pill">VP: ${vp - p.vpCards} (+?)</span>
+            <strong>${p.name}${p.isAI ? ` (${p.aiLevel === "ai-hard" ? "AI Hard" : (p.aiLevel === "ai-normal" ? "AI Normal" : "AI Easy")})` : ""} ${badges}</strong><span class="pill">VP: ${vp - p.vpCards} (+?)</span>
           </div>
           <div style="margin-top:4px; font-size:12px; color:var(--muted)">
             Roads ${15-p.roads}/15 · Settlements ${5-p.settlements}/5 · Cities ${4-p.cities}/4 · Cards ${totalCards}
@@ -1141,6 +1249,9 @@
 
       const isMain = state.phase === "main";
       const p = currentPlayer();
+      const giveRes = el("tradeGive").value || RES[0];
+      const currentRate = getBestTradeRate(p.id, giveRes);
+      el("bankTradeBtn").textContent = `Bank Trade ${currentRate}:1`;
       const hasPlayable = (name) => !state.devCardPlayedThisTurn && p.dev.some(c => c.type === name && isDevPlayable(c, p.id));
       el("rollBtn").disabled = !isMain || state.diceRolled || state.aiThinking;
       el("endTurnBtn").disabled = !isMain || !state.diceRolled || state.pendingAction !== null || state.aiThinking;
@@ -1152,12 +1263,21 @@
       el("playYearBtn").disabled = !isMain || state.pendingAction !== null || state.aiThinking || !hasPlayable("Year of Plenty");
       el("playMonoBtn").disabled = !isMain || state.pendingAction !== null || state.aiThinking || !hasPlayable("Monopoly");
       el("cancelActionBtn").disabled = !(state.phase === "main" && state.pendingAction && state.pendingAction.type !== "robber");
+      el("devCardButtons").style.display = p.dev.length ? "flex" : "none";
     }
 
-    function render() {
+    function renderNow() {
       renderBoard();
       renderPanels();
       saveGame();
+    }
+    function render() {
+      if (state.renderQueued) return;
+      state.renderQueued = true;
+      requestAnimationFrame(() => {
+        state.renderQueued = false;
+        renderNow();
+      });
     }
 
     function finishSetupPlacement(secondSettlementIntId) {
@@ -1189,6 +1309,7 @@
     function startGame() {
       mkBoard();
       buildGraph();
+      assignPorts();
       makePlayers(Number(el("playerCount").value));
       makeDevDeck();
       state.current = 0;
@@ -1224,7 +1345,14 @@
       el("diceResult").textContent = "Dice: —";
       log(`Turn passes to ${currentPlayer().name}.`);
       render();
-      maybeRunAiTurn();
+      const next = currentPlayer();
+      if (!next.isAI) {
+        el("passTitle").textContent = `${next.name}'s turn`;
+        el("passBody").textContent = "Pass the device to the next player, then tap Continue.";
+        el("passOverlay").classList.add("open");
+      } else {
+        maybeRunAiTurn();
+      }
     }
 
     function doDiscard(res) {
@@ -1253,8 +1381,8 @@
 
     function doBuyDev() {
       const p = currentPlayer();
-      if (!canAfford(p, COST.dev)) return alert("Not enough resources.");
-      if (!state.devDeck.length) return alert("No development cards left.");
+      if (!canAfford(p, COST.dev)) return notify("Not enough resources.");
+      if (!state.devDeck.length) return notify("No development cards left.");
       payCost(p, COST.dev);
       const card = state.devDeck.pop();
       if (card === "Victory Point") {
@@ -1324,9 +1452,9 @@
 
     function playDev(cardName) {
       const p = currentPlayer();
-      if (state.devCardPlayedThisTurn) return alert("Already played a dev card this turn.");
+      if (state.devCardPlayedThisTurn) return notify("Already played a dev card this turn.");
       const idx = p.dev.findIndex(c => c.type === cardName && isDevPlayable(c, p.id));
-      if (idx < 0) return alert(`No ${cardName} card available.`);
+      if (idx < 0) return notify(`No ${cardName} card available.`);
       p.dev.splice(idx, 1);
       state.devCardPlayedThisTurn = true;
 
@@ -1351,12 +1479,13 @@
       const p = currentPlayer();
       const give = el("tradeGive").value;
       const get = el("tradeGet").value;
-      if (give === get) return alert("Pick different resources.");
-      if (p.resources[give] < 4) return alert("Need 4 cards of given resource.");
-      if (state.bank[get] < 1) return alert("Bank lacks requested resource.");
-      p.resources[give] -= 4; state.bank[give] += 4;
+      const rate = getBestTradeRate(p.id, give);
+      if (give === get) return notify("Pick different resources.");
+      if (p.resources[give] < rate) return notify(`Need ${rate} cards of given resource.`);
+      if (state.bank[get] < 1) return notify("Bank lacks requested resource.");
+      p.resources[give] -= rate; state.bank[give] += rate;
       p.resources[get] += 1; state.bank[get] -= 1;
-      log(`${p.name} traded 4 ${give} for 1 ${get} with bank.`);
+      log(`${p.name} traded ${rate} ${give} for 1 ${get} with bank.`);
       render();
     }
 
@@ -1365,15 +1494,17 @@
       const to = Number(el("offerTo").value);
       const give = el("offerGive").value;
       const want = el("offerWant").value;
-      if (to === p.id) return alert("Choose another player.");
-      if (give === want) return alert("Use different resources.");
-      if (p.resources[give] < 1) return alert("You do not have offered resource.");
+      const giveQty = Math.max(1, Number(el("offerGiveQty").value || 1));
+      const wantQty = Math.max(1, Number(el("offerWantQty").value || 1));
+      if (to === p.id) return notify("Choose another player.");
+      if (give === want) return notify("Use different resources.");
+      if (p.resources[give] < giveQty) return notify("You do not have enough offered cards.");
 
       const op = state.players[to];
       const body = `
-        <p>${p.name} offers 1 ${RES_ICONS[give]} for 1 ${RES_ICONS[want]}</p>
+        <p>${p.name} offers ${giveQty} ${RES_ICONS[give]} for ${wantQty} ${RES_ICONS[want]}</p>
         <div style="display:flex; gap:10px; margin-top:10px;">
-          <button class="primary" onclick="acceptPlayerTrade(${p.id}, ${op.id}, '${give}', '${want}')">Accept</button>
+          <button class="primary" onclick="acceptPlayerTrade(${p.id}, ${op.id}, '${give}', '${want}', ${giveQty}, ${wantQty})">Accept</button>
           <button class="warn" onclick="cancelModal()">Reject</button>
         </div>
       `;
@@ -1381,17 +1512,17 @@
       el("closeModal").style.display = "none";
     }
 
-    function acceptPlayerTrade(fromId, toId, give, want) {
+    function acceptPlayerTrade(fromId, toId, give, want, giveQty, wantQty) {
       const p = state.players[fromId];
       const op = state.players[toId];
-      if (op.resources[want] < 1) {
-        alert(`${op.name} lacks ${want}.`);
+      if (op.resources[want] < wantQty) {
+        notify(`${op.name} lacks enough ${want}.`);
         cancelModal();
         return;
       }
-      p.resources[give]--; op.resources[give]++;
-      op.resources[want]--; p.resources[want]++;
-      log(`${p.name} traded 1 ${give} for 1 ${want} with ${op.name}.`);
+      p.resources[give] -= giveQty; op.resources[give] += giveQty;
+      op.resources[want] -= wantQty; p.resources[want] += wantQty;
+      log(`${p.name} traded ${giveQty} ${give} for ${wantQty} ${want} with ${op.name}.`);
       cancelModal();
       render();
     }
@@ -1410,8 +1541,11 @@
       const p = currentPlayer();
       const vp = countVP(p.id);
       if (vp >= 10) {
-        showModal("Game Over!", `<div class="winner">${p.name} wins with ${vp} VP!</div>`, "New Game", "Close", () => startGame());
-        log(`${p.name} wins the game with ${vp} VP!`);
+        renderNow();
+        setTimeout(() => {
+          showModal("Game Over!", `<div class="winner">${p.name} wins with ${vp} VP!</div>`, "New Game", "Close", () => startGame());
+          log(`${p.name} wins the game with ${vp} VP!`);
+        }, 200);
       }
     }
 
@@ -1437,14 +1571,89 @@
       return best ?? state.robberHex;
     }
 
+    function scoreIntersectionValue(intId) {
+      const i = state.intersections[intId];
+      let score = 0;
+      i.adjHex.forEach(hid => {
+        const h = state.hexes[hid];
+        const pips = {2:1,3:2,4:3,5:4,6:5,8:5,9:4,10:3,11:2,12:1}[h.token] || 0;
+        if (h.resource !== "desert") score += pips;
+      });
+      return score;
+    }
+
+    function chooseBestRoadEdge(pid, edges) {
+      let best = edges[0];
+      let bestScore = -999;
+      edges.forEach(eid => {
+        const e = state.edges[eid];
+        const score = scoreIntersectionValue(e.a) + scoreIntersectionValue(e.b);
+        if (score > bestScore) {
+          bestScore = score;
+          best = eid;
+        }
+      });
+      return best;
+    }
+
+    function aiPlayUtilityDev(p, pid, level) {
+      if (level === "ai-easy" || state.devCardPlayedThisTurn) return false;
+      const monopoly = p.dev.find(c => c.type === "Monopoly" && isDevPlayable(c, pid));
+      const yop = p.dev.find(c => c.type === "Year of Plenty" && isDevPlayable(c, pid));
+      if (monopoly) {
+        let pick = "grain";
+        let best = -1;
+        RES.forEach(r => {
+          const total = state.players.reduce((s, op) => s + (op.id === pid ? 0 : op.resources[r]), 0);
+          if (total > best) { best = total; pick = r; }
+        });
+        if (best >= 4) {
+          playDev("Monopoly");
+          doMonopoly(pick);
+          return true;
+        }
+      }
+      if (yop) {
+        playDev("Year of Plenty");
+        const shortages = Object.entries(COST.settlement).flatMap(([r, v]) => Array(Math.max(0, v - p.resources[r])).fill(r));
+        const picks = shortages.slice(0, 2);
+        while (picks.length < 2) picks.push("ore");
+        doYearOfPlenty(picks[0]);
+        doYearOfPlenty(picks[1]);
+        return true;
+      }
+      return false;
+    }
+
+    function aiShouldPlayKnightBeforeRoll(pid) {
+      return state.intersections.some(i => {
+        if (i.owner !== pid || !i.adjHex.includes(state.robberHex)) return false;
+        const hex = state.hexes[state.robberHex];
+        return [6, 8, 5, 9].includes(hex.token);
+      });
+    }
+
     async function runAiTurn(pid) {
       if (state.current !== pid || state.phase !== "main") return;
       const p = currentPlayer();
+      const level = p.aiLevel || "ai-easy";
       if (!p.isAI) return;
       state.aiThinking = true;
       render();
       await sleep(350);
 
+      if (!state.diceRolled && (level === "ai-normal" || level === "ai-hard")) {
+        const preRollKnight = p.dev.find(c => c.type === "Knight" && isDevPlayable(c, pid));
+        if (preRollKnight && aiShouldPlayKnightBeforeRoll(pid)) {
+          playDev("Knight");
+          await sleep(220);
+          if (state.pendingAction?.type === "robber") {
+            moveRobber(aiChooseRobberHex(pid), pid);
+            state.pendingAction = null;
+            render();
+          }
+        }
+      }
       if (!state.diceRolled) rollDice();
       await sleep(350);
 
@@ -1455,14 +1664,15 @@
         await sleep(250);
       }
 
-      const level = p.aiLevel || "ai-easy";
-      const maxBuildLoops = level === "ai-normal" ? 4 : 2;
+      aiPlayUtilityDev(p, pid, level);
+      const maxBuildLoops = level === "ai-hard" ? 6 : (level === "ai-normal" ? 4 : 2);
       for (let i = 0; i < maxBuildLoops; i++) {
         let acted = false;
 
         // AI Bank Trade logic
         RES.forEach(rGive => {
-          if (p.resources[rGive] >= 4) {
+          const rate = getBestTradeRate(pid, rGive);
+          if (p.resources[rGive] >= rate) {
             // Find what we need
             const needs = [];
             if (p.settlements > 0 && p.resources.brick < 1) needs.push('brick');
@@ -1474,9 +1684,9 @@
             if (needs.length > 0) {
               const rGet = needs[0];
               if (state.bank[rGet] > 0) {
-                p.resources[rGive] -= 4; state.bank[rGive] += 4;
+                p.resources[rGive] -= rate; state.bank[rGive] += rate;
                 p.resources[rGet] += 1; state.bank[rGet] -= 1;
-                log(`${p.name} (AI) bank traded 4 ${rGive} for 1 ${rGet}.`);
+                log(`${p.name} (AI) bank traded ${rate} ${rGive} for 1 ${rGet}.`);
                 acted = true;
               }
             }
@@ -1491,13 +1701,19 @@
         } else {
           const setSpots = eligibleSettlementSpots(pid);
           if (setSpots.length && canAfford(p, COST.settlement) && p.settlements > 0) {
-            placeSettlement(pid, setSpots[Math.floor(Math.random() * setSpots.length)], false);
+            const bestSpot = level === "ai-easy"
+              ? setSpots[Math.floor(Math.random() * setSpots.length)]
+              : [...setSpots].sort((a, b) => scoreIntersectionValue(b) - scoreIntersectionValue(a))[0];
+            placeSettlement(pid, bestSpot, false);
             log(`${p.name} (AI) built a settlement.`);
             acted = true;
           } else {
             const roadEdges = eligibleRoadEdges(pid);
             if (roadEdges.length && canAfford(p, COST.road) && p.roads > 0) {
-              placeRoad(pid, roadEdges[Math.floor(Math.random() * roadEdges.length)], false);
+              const edgePick = level === "ai-easy"
+                ? roadEdges[Math.floor(Math.random() * roadEdges.length)]
+                : chooseBestRoadEdge(pid, roadEdges);
+              placeRoad(pid, edgePick, false);
               log(`${p.name} (AI) built a road.`);
               acted = true;
             } else if (canAfford(p, COST.dev) && state.devDeck.length) {
@@ -1579,7 +1795,7 @@
           await sleep(500);
 
           const edgeChoices = state.edges.filter(e => setupCanPlaceRoad(pid, e.id, bestSpot));
-          const edge = edgeChoices[Math.floor(Math.random() * edgeChoices.length)];
+          const edge = edgeChoices.sort((a, b) => (scoreIntersectionValue(b.a) + scoreIntersectionValue(b.b)) - (scoreIntersectionValue(a.a) + scoreIntersectionValue(a.b)))[0];
           if (placeRoad(pid, edge.id, true)) {
             log(`${currentPlayer().name} (AI) placed setup road.`);
             state.aiThinking = false;
@@ -1592,6 +1808,7 @@
 
     function bind() {
       el("playerCount").addEventListener("change", updatePlayerTypeControls);
+      el("tradeGive").addEventListener("change", render);
       el("newGameBtn").addEventListener("click", () => {
         if (state.phase === "main") {
           showModal("New Game?", "Are you sure you want to restart? Current progress will be lost.", "Yes, Restart", "No, Continue", () => startGame());
@@ -1610,21 +1827,21 @@
 
       el("buildRoadBtn").addEventListener("click", () => {
         const p = currentPlayer();
-        if (!canAfford(p, COST.road)) return alert("Need brick + lumber.");
+        if (!canAfford(p, COST.road)) return notify("Need brick + lumber.");
         state.pendingAction = { type: "road", remaining: 1, free: false };
         log(`${p.name} choose a legal edge for road.`);
         render();
       });
       el("buildSettlementBtn").addEventListener("click", () => {
         const p = currentPlayer();
-        if (!canAfford(p, COST.settlement)) return alert("Need brick+lumber+wool+grain.");
+        if (!canAfford(p, COST.settlement)) return notify("Need brick+lumber+wool+grain.");
         state.pendingAction = { type: "settlement", free: false };
         log(`${p.name} choose legal intersection for settlement.`);
         render();
       });
       el("buildCityBtn").addEventListener("click", () => {
         const p = currentPlayer();
-        if (!canAfford(p, COST.city)) return alert("Need 2 grain + 3 ore.");
+        if (!canAfford(p, COST.city)) return notify("Need 2 grain + 3 ore.");
         state.pendingAction = { type: "city" };
         log(`${p.name} choose one of your settlements to upgrade.`);
         render();
@@ -1637,6 +1854,21 @@
       el("bankTradeBtn").addEventListener("click", doBankTrade);
       el("playerTradeBtn").addEventListener("click", doPlayerTrade);
       el("closeModal").addEventListener("click", () => el("modal").classList.remove("open"));
+      el("passContinueBtn").addEventListener("click", () => {
+        el("passOverlay").classList.remove("open");
+        maybeRunAiTurn();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key.toLowerCase() === "r") el("rollBtn").click();
+        if (e.key.toLowerCase() === "e") el("endTurnBtn").click();
+        if (e.key === "Escape") {
+          if (el("passOverlay").classList.contains("open")) el("passOverlay").classList.remove("open");
+          else if (state.pendingAction && state.pendingAction.type !== "robber") {
+            state.pendingAction = null;
+            render();
+          }
+        }
+      });
     }
 
     function init() {
