@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="A polished local multiplayer Catan board game experience with setup tools, AI players, trade controls, and live game logs." />
+  <meta name="theme-color" content="#0d2137" />
   <title>Catan</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,6 +13,7 @@
     :root {
       --ocean: #0d2137;
       --ocean-mid: #123352;
+      --ocean-glow: #1f4b72;
       --panel-bg: #1a1005;
       --panel-wood: #231508;
       --panel-border: rgba(180,130,60,.35);
@@ -28,6 +31,7 @@
       --p1: #2090a0;
       --p2: #d8c030;
       --p3: #9050d0;
+      --focus-ring: 0 0 0 2px rgba(232,184,64,.5), 0 0 0 4px rgba(13,33,55,.7);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -40,6 +44,8 @@
       color: var(--ink);
       min-height: 100vh;
       overflow-x: hidden;
+      line-height: 1.35;
+      text-rendering: optimizeLegibility;
     }
 
     /* ── LAYOUT ── */
@@ -51,6 +57,7 @@
       height: 100vh;
       max-width: 1600px;
       margin: 0 auto;
+      box-shadow: 0 14px 40px rgba(0,0,0,.4);
     }
     .app-header {
       grid-column: 1 / -1;
@@ -61,6 +68,10 @@
       background: rgba(0,0,0,.4);
       border-bottom: 1px solid var(--panel-border);
       gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(4px);
     }
     .app-title {
       display: flex;
@@ -113,10 +124,21 @@
       overflow: hidden;
       background: radial-gradient(circle at 50% 50%, #194060 0%, #0d2137 70%);
     }
+    .board-area::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at 50% 45%, rgba(255,255,255,.08), transparent 55%),
+                  radial-gradient(circle at 50% 95%, rgba(0,0,0,.35), transparent 45%);
+      mix-blend-mode: screen;
+    }
     #boardSvg {
       display: block;
       width: 100%;
       height: 100%;
+      position: relative;
+      z-index: 1;
     }
 
     /* ── SIDE PANEL ── */
@@ -171,6 +193,10 @@
       gap: 8px;
       flex-wrap: wrap;
     }
+    .setup-row label {
+      color: var(--ink-muted);
+      font-size: 13px;
+    }
 
     /* ── CONTROLS ── */
     select, input {
@@ -184,6 +210,10 @@
     }
     input[type="number"] { width: 62px; }
     select:focus, input:focus { outline: 1px solid var(--gold); }
+    select:focus-visible, input:focus-visible, button:focus-visible, .tab-btn:focus-visible {
+      outline: none;
+      box-shadow: var(--focus-ring);
+    }
 
     button {
       cursor: pointer;
@@ -267,6 +297,33 @@
       line-height: 1.4;
     }
     .action-hint.inactive { background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.1); color: var(--ink-muted); }
+    .helper-panel {
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 8px;
+      padding: 9px 10px;
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--ink-muted);
+    }
+    .helper-panel strong {
+      color: var(--ink);
+      font-family: 'Cinzel', serif;
+      font-size: 11px;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .kbd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 11px;
+      border: 1px solid rgba(255,255,255,.2);
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      padding: 0 5px;
+      color: var(--ink);
+      background: rgba(0,0,0,.35);
+    }
 
     /* ── BUILD BUTTONS ── */
     .build-grid {
@@ -384,6 +441,10 @@
       flex: 1;
       overflow-y: auto;
       line-height: 1.55;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 8px;
+      background: rgba(0,0,0,.2);
+      padding: 5px;
     }
     .log-entry { padding: 3px 2px; border-bottom: 1px solid rgba(255,255,255,.04); }
     .log-entry .ts { color: var(--ink-muted); font-size: 11px; margin-right: 4px; }
@@ -592,6 +653,25 @@
     .token-text { font-weight: 700; font-size: 15px; fill: #1a0e00; font-family: 'Cinzel', serif; pointer-events: none; }
     .token-text.red { fill: #b00020; }
     .hex-res-label { font-size: 11px; fill: rgba(0,0,0,.5); font-style: italic; pointer-events: none; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -604,9 +684,9 @@
       <span>Local Multiplayer · First to 10 VP wins</span>
     </div>
     <div class="header-pills">
-      <span id="phasePill" class="pill phase">Setup</span>
-      <span id="turnPill" class="pill turn">—</span>
-      <span id="subturnPill" class="pill status">—</span>
+      <span id="phasePill" class="pill phase" aria-live="polite">Setup</span>
+      <span id="turnPill" class="pill turn" aria-live="polite">—</span>
+      <span id="subturnPill" class="pill status" aria-live="polite">—</span>
       <span id="aiThinkingBadge" style="display:none;" class="ai-thinking-badge">
         <span class="ai-dot"></span> AI thinking…
       </span>
@@ -619,12 +699,12 @@
   </header>
 
   <!-- BOARD -->
-  <main class="board-area">
-    <svg id="boardSvg" viewBox="0 0 1200 900" preserveAspectRatio="xMidYMid meet"></svg>
+  <main class="board-area" role="main" aria-label="Catan board">
+    <svg id="boardSvg" viewBox="0 0 1200 900" preserveAspectRatio="xMidYMid meet" aria-label="Catan game board"></svg>
   </main>
 
   <!-- SIDE PANEL -->
-  <aside class="side">
+  <aside class="side" aria-label="Game controls and player info">
     <div class="tabs">
       <button class="tab-btn active" data-tab="actions">🎲 Actions</button>
       <button class="tab-btn" data-tab="trade">💰 Trade</button>
@@ -638,7 +718,7 @@
       <div>
         <div class="section-title">Game Setup</div>
         <div class="setup-row">
-          <label>Players</label>
+          <label for="playerCount">Players</label>
           <select id="playerCount">
             <option value="2">2</option>
             <option value="3" selected>3</option>
@@ -649,6 +729,12 @@
         <div id="playerTypeConfig"></div>
         <div id="playerNameConfig"></div>
         <div class="legend" style="margin-top:6px;">R = Roll · E = End Turn · Esc = Cancel</div>
+        <div class="helper-panel" aria-label="Quick help">
+          <strong>Flow</strong>
+          <div>Roll dice, resolve resources, then build, trade, or play one development card.</div>
+          <strong>Hotkeys</strong>
+          <div><span class="kbd">R</span> Roll · <span class="kbd">E</span> End Turn · <span class="kbd">Esc</span> Cancel current action</div>
+        </div>
       </div>
 
       <!-- Dice -->
@@ -656,10 +742,10 @@
         <div class="section-title">Dice Roll</div>
         <div class="dice-box">
           <div class="dice-pair">
-            <div class="die-face" id="die1"><svg class="die-svg" viewBox="0 0 26 26" id="dieSvg1"></svg></div>
-            <div class="die-face" id="die2"><svg class="die-svg" viewBox="0 0 26 26" id="dieSvg2"></svg></div>
+            <div class="die-face" id="die1"><svg class="die-svg" viewBox="0 0 26 26" id="dieSvg1" aria-hidden="true"></svg></div>
+            <div class="die-face" id="die2"><svg class="die-svg" viewBox="0 0 26 26" id="dieSvg2" aria-hidden="true"></svg></div>
           </div>
-          <div class="dice-total" id="diceTotal">—</div>
+          <div class="dice-total" id="diceTotal" aria-live="polite">—</div>
           <div class="dice-buttons">
             <button id="rollBtn" class="gold">Roll!</button>
             <button id="endTurnBtn" class="primary">End Turn</button>
@@ -668,13 +754,13 @@
       </div>
 
       <!-- Action Hint -->
-      <div id="actionHint" class="action-hint inactive">No pending action</div>
+      <div id="actionHint" class="action-hint inactive" aria-live="polite">No pending action</div>
       <div style="text-align:right"><button id="cancelActionBtn" style="font-size:11px; padding:4px 8px;">✕ Cancel</button></div>
 
       <!-- Round Summary -->
       <div>
         <div class="section-title">Round Summary</div>
-        <div id="quickStats" class="quick-stats"></div>
+        <div id="quickStats" class="quick-stats" aria-live="polite"></div>
       </div>
 
       <!-- Build -->
@@ -721,10 +807,10 @@
       <div class="trade-group">
         <div class="section-title">Bank Trade</div>
         <div class="trade-row">
-          <label>Give</label>
+          <label for="tradeGive">Give</label>
           <select id="tradeGive"></select>
           <span class="trade-rate" id="tradeRateDisplay">4:1</span>
-          <label>Get</label>
+          <label for="tradeGet">Get</label>
           <select id="tradeGet"></select>
         </div>
         <div class="trade-row">
@@ -736,15 +822,15 @@
       <div class="trade-group">
         <div class="section-title">Player Trade</div>
         <div class="trade-row">
-          <label>To</label><select id="offerTo"></select>
+          <label for="offerTo">To</label><select id="offerTo"></select>
         </div>
         <div class="trade-row">
-          <label>Offer</label>
+          <label for="offerGiveQty">Offer</label>
           <input id="offerGiveQty" type="number" min="1" value="1" />
           <select id="offerGive"></select>
         </div>
         <div class="trade-row">
-          <label>Want</label>
+          <label for="offerWantQty">Want</label>
           <input id="offerWantQty" type="number" min="1" value="1" />
           <select id="offerWant"></select>
         </div>
@@ -761,7 +847,7 @@
 
     <!-- LOG TAB -->
     <div class="tab-panel" id="tab-log" style="flex:1;">
-      <div class="log-box" id="logBox"></div>
+      <div class="log-box" id="logBox" aria-live="polite"></div>
     </div>
   </aside>
 </div>
