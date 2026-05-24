@@ -7826,4 +7826,1025 @@ class GameApp {
         const player = this.game.currentPlayer;
         
         if (!player.canPlayDevCard(type, this.game.turnNumber)) {
-            this.toast
+            this.toast.show('Cannot play this card now', 'error');
+            this.audio.error();
+            return;
+        }
+        
+        if (this.game.hasPlayedDevCardThisTurn && type !== 'victoryPoint') {
+            this.toast.show('You can only play one development card per turn', 'error');
+            this.audio.error();
+            return;
+        }
+
+        if (type === 'knight') {
+            this.startPlayKnight(player);
+        } else if (type === 'roadBuilding') {
+            this.startPlayRoadBuilding(player);
+        } else if (type === 'yearOfPlenty') {
+            this.startPlayYearOfPlenty(player);
+        } else if (type === 'monopoly') {
+            this.startPlayMonopoly(player);
+        }
+    }
+    
+    /**
+     * Start playing a Knight card
+     */
+    async startPlayKnight(player) {
+        const card = player.playDevCard('knight');
+        if (!card) return;
+        
+        this.audio.cardPlay();
+        this.game.hasPlayedDevCardThisTurn = true;
+        this.gameStats.knights++;
+        this.addLog(`${player.name} played a Knight`, 'important');
+        
+        this.setStatus('Move the robber to any hex');
+        
+        const validHexes = this.game.board.hexes
+            .filter(h => h.index !== this.game.board.robberPosition)
+            .map(h => h.index);
+            
+        validHexes.forEach(h => this.renderer.highlightHex(h, true));
+        
+        this.renderer.hexLayer.querySelectorAll('.hex-tile').forEach(el => {
+            const idx = parseInt(el.dataset.hexIndex);
+            if (validHexes.includes(idx)) {
+                el.style.cursor = 'pointer';
+                el.onclick = async () => {
+                    validHexes.forEach(h => this.renderer.highlightHex(h, false));
+                    this.renderer.hexLayer.querySelectorAll('.hex-tile').forEach(e => {
+                        e.style.cursor = '';
+                        e.onclick = null;
+                    });
+                    await this.moveRobber(player, idx);
+                    await this.handleRobberSteal(player, idx);
+                    this.game.updateLargestArmy();
+                    this.updateUI();
+                };
+            }
+        });
+    }
+    
+    /**
+     * Start playing Road Building card
+     */
+    async startPlayRoadBuilding(player) {
+        const card = player.playDevCard('roadBuilding');
+        if (!card) return;
+        
+        this.audio.cardPlay();
+        this.game.hasPlayedDevCardThisTurn = true;
+        this.addLog(`${player.name} played Road Building`, 'important');
+        
+        let roadsToPlace = Math.min(2, player.pieces.road);
+        if (roadsToPlace === 0) {
+            this.toast.show('No roads left to place', 'warning');
+            this.updateUI();
+            return;
+        }
+        
+        const placeNextRoad = async () => {
+            if (roadsToPlace <= 0) {
+                this.updateUI();
+                return;
+            }
+            
+            this.setStatus(`Place a road (${roadsToPlace} remaining)`);
+            const validEdges = this.game.board.edges
+                .filter(e => this.game.isValidRoadEdge(e.id, player.index, false))
+                .map(e => e.id);
+                
+            if (validEdges.length === 0) {
+                this.toast.show('No valid road positions', 'warning');
+                this.updateUI();
+                return;
+            }
+            
+            this.renderer.showValidEdges(validEdges, CONFIG.PLAYER_COLORS[player.index], async (edgeId) => {
+                this.game.buildRoad(player.index, edgeId);
+                this.renderer.placeRoad(edgeId, player.index);
+                this.renderer.clearEdgeMarkers();
+                this.audio.build();
+                this.gameStats.roads++;
+                this.addLog(`${player.name} built a free road`);
+                roadsToPlace--;
+                
+                const winner = this.game.checkWin();
+                if (winner !== null) {
+                    await this.handleVictory(winner);
+                    return;
+                }
+                
+                await placeNextRoad();
+            });
+        };
+        
+        await placeNextRoad();
+    }
+    
+    /**
+     * Start playing Year of Plenty card
+     */
+    startPlayYearOfPlenty(player) {
+        const content = Utils.createElement('div');
+        content.appendChild(Utils.createElement('p', {
+            style: { fontFamily: 'var(--font-body)', marginBottom: '1rem' },
+            text: 'Choose any 2 resources from the bank:'
+        }));
+        
+        let chosen = [];
+        const grid = Utils.createElement('div', { class: 'discard-grid' });
+        
+        const updateGrid = () => {
+            grid.innerHTML = '';
+            ['brick', 'lumber', 'wool', 'grain', 'ore'].forEach(res => {
+                const item = Utils.createElement('div', { class: 'discard-resource' });
+                item.appendChild(Utils.createElement('div', {
+                    class: `resource-icon res-${res}`,
+                    text: CONFIG.RESOURCE_EMOJI[res]
+                }));
+                item.appendChild(Utils.createElement('div', {
+                    text: CONFIG.RESOURCE_NAMES[res]
+                }));
+                
+                item.addEventListener('click', () => {
+                    if (chosen.length < 2) {
+                        chosen.push(res);
+                        item.classList.add('selected');
+                        if (chosen.length === 2) {
+                            confirmBtn.disabled = false;
+                        }
+                    }
+                });
+                
+                grid.appendChild(item);
+            });
+        };
+        
+        updateGrid();
+        content.appendChild(grid);
+        
+        let confirmBtn;
+        this.modals.open('🌟 Year of Plenty', content, [
+            { text: 'Cancel', onClick: () => {} },
+            {
+                text: 'Take Resources',
+                class: 'primary',
+                disabled: true,
+                onClick: () => {
+                    const card = player.playDevCard('yearOfPlenty');
+                    if (card) {
+                        this.audio.cardPlay();
+                        this.game.hasPlayedDevCardThisTurn = true;
+                        this.game.executeYearOfPlenty(player.index, chosen);
+                        this.addLog(`${player.name} played Year of Plenty`, 'important');
+                        this.toast.show(`Received ${chosen.map(r => CONFIG.RESOURCE_EMOJI[r]).join(' ')}`, 'success');
+                        this.updateUI();
+                    }
+                }
+            }
+        ]);
+        confirmBtn = this.modals.footerEl.querySelectorAll('.footer-btn')[1];
+    }
+    
+    /**
+     * Start playing Monopoly card
+     */
+    startPlayMonopoly(player) {
+        const content = Utils.createElement('div');
+        content.appendChild(Utils.createElement('p', {
+            style: { fontFamily: 'var(--font-body)', marginBottom: '1rem' },
+            text: 'Choose a resource to claim from all opponents:'
+        }));
+        
+        let chosenRes = null;
+        const grid = Utils.createElement('div', { class: 'monopoly-options' });
+        
+        ['brick', 'lumber', 'wool', 'grain', 'ore'].forEach(res => {
+            const item = Utils.createElement('div', { class: 'monopoly-option' });
+            item.appendChild(Utils.createElement('div', {
+                class: `resource-icon res-${res}`,
+                text: CONFIG.RESOURCE_EMOJI[res]
+            }));
+            item.appendChild(Utils.createElement('div', {
+                text: CONFIG.RESOURCE_NAMES[res]
+            }));
+            
+            item.addEventListener('click', () => {
+                grid.querySelectorAll('.monopoly-option').forEach(i => i.classList.remove('selected'));
+                item.classList.add('selected');
+                chosenRes = res;
+                confirmBtn.disabled = false;
+            });
+            
+            grid.appendChild(item);
+        });
+        
+        content.appendChild(grid);
+        
+        let confirmBtn;
+        this.modals.open('💸 Monopoly', content, [
+            { text: 'Cancel', onClick: () => {} },
+            {
+                text: 'Claim Resources',
+                class: 'primary',
+                disabled: true,
+                onClick: () => {
+                    const card = player.playDevCard('monopoly');
+                    if (card) {
+                        this.audio.cardPlay();
+                        this.game.hasPlayedDevCardThisTurn = true;
+                        const total = this.game.executeMonopoly(player.index, chosenRes);
+                        this.addLog(`${player.name} played Monopoly on ${CONFIG.RESOURCE_NAMES[chosenRes]} (+${total})`, 'important');
+                        this.toast.show(`Stole ${total} ${CONFIG.RESOURCE_NAMES[chosenRes]}!`, 'success');
+                        this.updateUI();
+                    }
+                }
+            }
+        ]);
+        confirmBtn = this.modals.footerEl.querySelectorAll('.footer-btn')[1];
+    }
+    
+    // --------------------------------------------------------
+    // TRADING SYSTEM
+    // --------------------------------------------------------
+    
+    openBankTradeModal() {
+        const player = this.game.currentPlayer;
+        const content = Utils.createElement('div');
+        
+        content.appendChild(Utils.createElement('div', {
+            class: 'trade-summary',
+            style: { marginBottom: '1rem' },
+            text: 'Trade 4 of the same resource for 1 of any resource. (Ports not fully implemented in this base version).'
+        }));
+        
+        const giveRes = { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 };
+        const getRes = { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 };
+        
+        const grid = Utils.createElement('div', { class: 'trade-grid' });
+        
+        // Give side
+        const giveSide = Utils.createElement('div', { class: 'trade-side' });
+        giveSide.appendChild(Utils.createElement('div', { class: 'trade-side-title', text: 'You Give' }));
+        
+        // Get side
+        const getSide = Utils.createElement('div', { class: 'trade-side' });
+        getSide.appendChild(Utils.createElement('div', { class: 'trade-side-title', text: 'You Get' }));
+        
+        const updateUI = () => {
+            giveSide.querySelectorAll('.trade-resource-row').forEach(row => row.remove());
+            getSide.querySelectorAll('.trade-resource-row').forEach(row => row.remove());
+            
+            ['brick', 'lumber', 'wool', 'grain', 'ore'].forEach(res => {
+                // Give row
+                const gRow = Utils.createElement('div', { class: 'trade-resource-row' });
+                gRow.appendChild(Utils.createElement('div', { class: `resource-icon res-${res}`, text: CONFIG.RESOURCE_EMOJI[res] }));
+                gRow.appendChild(Utils.createElement('div', { class: 'trade-resource-name', text: CONFIG.RESOURCE_NAMES[res] }));
+                
+                const gCounter = Utils.createElement('div', { class: 'trade-counter' });
+                const gMinus = Utils.createElement('button', { class: 'trade-counter-btn', text: '-' });
+                gMinus.disabled = giveRes[res] <= 0;
+                gMinus.onclick = () => { giveRes[res]--; updateUI(); };
+                
+                const gVal = Utils.createElement('span', { class: 'trade-counter-value', text: giveRes[res].toString() });
+                
+                const gPlus = Utils.createElement('button', { class: 'trade-counter-btn', text: '+' });
+                gPlus.disabled = giveRes[res] >= player.resources[res] || giveRes[res] >= 4;
+                gPlus.onclick = () => { giveRes[res]++; updateUI(); };
+                
+                gCounter.appendChild(gMinus);
+                gCounter.appendChild(gVal);
+                gCounter.appendChild(gPlus);
+                gRow.appendChild(gCounter);
+                giveSide.appendChild(gRow);
+                
+                // Get row
+                const rRow = Utils.createElement('div', { class: 'trade-resource-row' });
+                rRow.appendChild(Utils.createElement('div', { class: `resource-icon res-${res}`, text: CONFIG.RESOURCE_EMOJI[res] }));
+                rRow.appendChild(Utils.createElement('div', { class: 'trade-resource-name', text: CONFIG.RESOURCE_NAMES[res] }));
+                
+                const rCounter = Utils.createElement('div', { class: 'trade-counter' });
+                const rMinus = Utils.createElement('button', { class: 'trade-counter-btn', text: '-' });
+                rMinus.disabled = getRes[res] <= 0;
+                rMinus.onclick = () => { getRes[res]--; updateUI(); };
+                
+                const rVal = Utils.createElement('span', { class: 'trade-counter-value', text: getRes[res].toString() });
+                
+                const rPlus = Utils.createElement('button', { class: 'trade-counter-btn', text: '+' });
+                rPlus.disabled = getRes[res] >= 1; // Bank trade is typically 4:1 or 3:1 or 2:1 for 1 resource
+                rPlus.onclick = () => { getRes[res]++; updateUI(); };
+                
+                rCounter.appendChild(rMinus);
+                rCounter.appendChild(rVal);
+                rCounter.appendChild(rPlus);
+                rRow.appendChild(rCounter);
+                getSide.appendChild(rRow);
+            });
+            
+            // Validate
+            const totalGive = Object.values(giveRes).reduce((a, b) => a + b, 0);
+            const totalGet = Object.values(getRes).reduce((a, b) => a + b, 0);
+            
+            let isValid = false;
+            let message = 'Select resources to trade';
+            
+            if (totalGet === 1) {
+                const givingRes = Object.keys(giveRes).find(r => giveRes[r] > 0);
+                if (givingRes) {
+                    const rate = 4; // Simplified bank rate
+                    if (giveRes[givingRes] === rate && totalGive === rate) {
+                        isValid = true;
+                        message = `Trade ${rate} ${CONFIG.RESOURCE_NAMES[givingRes]} for 1 ${CONFIG.RESOURCE_NAMES[Object.keys(getRes).find(r => getRes[r] > 0)]}`;
+                    } else {
+                        message = `Bank requires exactly ${rate} of the same resource`;
+                    }
+                }
+            } else if (totalGet > 1) {
+                message = 'Bank only trades 1 resource at a time';
+            }
+            
+            summary.textContent = message;
+            summary.className = `trade-summary ${isValid ? 'valid' : 'invalid'}`;
+            confirmBtn.disabled = !isValid;
+        };
+        
+        grid.appendChild(giveSide);
+        grid.appendChild(Utils.createElement('div', { class: 'trade-arrow', text: '⇄' }));
+        grid.appendChild(getSide);
+        content.appendChild(grid);
+        
+        const summary = Utils.createElement('div', { class: 'trade-summary' });
+        content.appendChild(summary);
+        
+        let confirmBtn;
+        this.modals.open('🏦 Bank Trade', content, [
+            { text: 'Cancel' },
+            {
+                text: 'Execute Trade',
+                class: 'primary',
+                disabled: true,
+                onClick: () => {
+                    const give = {};
+                    const get = {};
+                    Object.keys(giveRes).forEach(r => { if (giveRes[r] > 0) give[r] = giveRes[r]; });
+                    Object.keys(getRes).forEach(r => { if (getRes[r] > 0) get[r] = getRes[r]; });
+                    
+                    this.executeBankTrade(player, give, get);
+                    this.addLog(`${player.name} traded with the bank`, 'success');
+                    this.gameStats.trades++;
+                    this.audio.trade();
+                    this.updateUI();
+                }
+            }
+        ]);
+        confirmBtn = this.modals.footerEl.querySelectorAll('.footer-btn')[1];
+        updateUI();
+    }
+    
+    executeBankTrade(player, give, get) {
+        player.removeResources(give);
+        player.addResources(get);
+    }
+    
+    openPlayerTradeModal() {
+        const player = this.game.currentPlayer;
+        const content = Utils.createElement('div');
+        
+        content.appendChild(Utils.createElement('p', {
+            style: { fontFamily: 'var(--font-body)', marginBottom: '1rem' },
+            text: 'Propose a trade to other players. (In this local hotseat version, players will accept/reject in turn).'
+        }));
+        
+        const giveRes = { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 };
+        const getRes = { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 };
+        
+        const grid = Utils.createElement('div', { class: 'trade-grid' });
+        
+        const giveSide = Utils.createElement('div', { class: 'trade-side' });
+        giveSide.appendChild(Utils.createElement('div', { class: 'trade-side-title', text: 'You Offer' }));
+        
+        const getSide = Utils.createElement('div', { class: 'trade-side' });
+        getSide.appendChild(Utils.createElement('div', { class: 'trade-side-title', text: 'You Want' }));
+        
+        const updateUI = () => {
+            giveSide.querySelectorAll('.trade-resource-row').forEach(row => row.remove());
+            getSide.querySelectorAll('.trade-resource-row').forEach(row => row.remove());
+            
+            ['brick', 'lumber', 'wool', 'grain', 'ore'].forEach(res => {
+                // Give
+                const gRow = Utils.createElement('div', { class: 'trade-resource-row' });
+                gRow.appendChild(Utils.createElement('div', { class: `resource-icon res-${res}`, text: CONFIG.RESOURCE_EMOJI[res] }));
+                const gCounter = Utils.createElement('div', { class: 'trade-counter' });
+                const gMinus = Utils.createElement('button', { class: 'trade-counter-btn', text: '-' });
+                gMinus.disabled = giveRes[res] <= 0;
+                gMinus.onclick = () => { giveRes[res]--; updateUI(); };
+                const gVal = Utils.createElement('span', { class: 'trade-counter-value', text: giveRes[res].toString() });
+                const gPlus = Utils.createElement('button', { class: 'trade-counter-btn', text: '+' });
+                gPlus.disabled = giveRes[res] >= player.resources[res];
+                gPlus.onclick = () => { giveRes[res]++; updateUI(); };
+                gCounter.append(gMinus, gVal, gPlus);
+                gRow.append(gCounter);
+                giveSide.appendChild(gRow);
+                
+                // Get
+                const rRow = Utils.createElement('div', { class: 'trade-resource-row' });
+                rRow.appendChild(Utils.createElement('div', { class: `resource-icon res-${res}`, text: CONFIG.RESOURCE_EMOJI[res] }));
+                const rCounter = Utils.createElement('div', { class: 'trade-counter' });
+                const rMinus = Utils.createElement('button', { class: 'trade-counter-btn', text: '-' });
+                rMinus.disabled = getRes[res] <= 0;
+                rMinus.onclick = () => { getRes[res]--; updateUI(); };
+                const rVal = Utils.createElement('span', { class: 'trade-counter-value', text: getRes[res].toString() });
+                const rPlus = Utils.createElement('button', { class: 'trade-counter-btn', text: '+' });
+                rPlus.onclick = () => { getRes[res]++; updateUI(); };
+                rCounter.append(rMinus, rVal, rPlus);
+                rRow.append(rCounter);
+                getSide.appendChild(rRow);
+            });
+            
+            const totalGive = Object.values(giveRes).reduce((a, b) => a + b, 0);
+            const totalGet = Object.values(getRes).reduce((a, b) => a + b, 0);
+            const isValid = totalGive > 0 && totalGet > 0;
+            
+            summary.textContent = isValid ? 'Ready to propose' : 'Offer and request at least 1 resource';
+            summary.className = `trade-summary ${isValid ? 'valid' : 'invalid'}`;
+            confirmBtn.disabled = !isValid;
+        };
+        
+        grid.append(giveSide, Utils.createElement('div', { class: 'trade-arrow', text: '⇄' }), getSide);
+        content.appendChild(grid);
+        
+        const summary = Utils.createElement('div', { class: 'trade-summary' });
+        content.appendChild(summary);
+        
+        let confirmBtn;
+        this.modals.open('🤝 Player Trade', content, [
+            { text: 'Cancel' },
+            {
+                text: 'Propose Trade',
+                class: 'primary',
+                disabled: true,
+                onClick: async () => {
+                    const give = {};
+                    const get = {};
+                    Object.keys(giveRes).forEach(r => { if (giveRes[r] > 0) give[r] = giveRes[r]; });
+                    Object.keys(getRes).forEach(r => { if (getRes[r] > 0) get[r] = getRes[r]; });
+                    
+                    await this.executePlayerTrade(player, give, get);
+                }
+            }
+        ]);
+        confirmBtn = this.modals.footerEl.querySelectorAll('.footer-btn')[1];
+        updateUI();
+    }
+    
+    async executePlayerTrade(initiator, give, get) {
+        this.modals.close();
+        
+        // In a local hotseat game, we ask each opponent if they want to accept
+        const opponents = this.game.players.filter(p => p.index !== initiator.index);
+        
+        for (const opp of opponents) {
+            // Check if opponent CAN accept
+            let canAccept = true;
+            Object.entries(get).forEach(([res, amt]) => {
+                if (opp.resources[res] < amt) canAccept = false;
+            });
+            
+            if (!canAccept) continue;
+            
+            // Prompt opponent
+            const accepted = await this.promptTradeResponse(initiator, opp, give, get);
+            if (accepted) {
+                // Execute trade
+                initiator.removeResources(give);
+                initiator.addResources(get);
+                opp.removeResources(get);
+                opp.addResources(give);
+                
+                this.audio.trade();
+                this.addLog(`${initiator.name} traded with ${opp.name}`, 'success');
+                this.gameStats.trades++;
+                this.updateUI();
+                return; // Trade successful, end turn phase for trading
+            }
+        }
+        
+        this.toast.show('No player accepted the trade', 'warning');
+    }
+    
+    promptTradeResponse(initiator, opponent, give, get) {
+        return new Promise(resolve => {
+            const giveStr = Object.entries(give).map(([r, a]) => `${a} ${CONFIG.RESOURCE_EMOJI[r]}`).join(', ');
+            const getStr = Object.entries(get).map(([r, a]) => `${a} ${CONFIG.RESOURCE_EMOJI[r]}`).join(', ');
+            
+            const content = Utils.createElement('div', {
+                style: { textAlign: 'center', fontFamily: 'var(--font-body)' }
+            });
+            content.appendChild(Utils.createElement('p', {
+                html: `<strong>${initiator.name}</strong> offers <strong>${giveStr}</strong> for <strong>${getStr}</strong>.`
+            }));
+            content.appendChild(Utils.createElement('p', {
+                text: `${opponent.name}, do you accept this trade?`,
+                style: { marginTop: '1rem', fontSize: '1.1rem' }
+            }));
+            
+            this.modals.open(`Trade Response (${opponent.name})`, content, [
+                { text: 'Reject', class: 'danger', onClick: () => resolve(false) },
+                { text: 'Accept', class: 'primary', onClick: () => resolve(true) }
+            ]);
+        });
+    }
+    
+    // --------------------------------------------------------
+    // UI RENDERING & UPDATES
+    // --------------------------------------------------------
+    
+    updateUI() {
+        if (!this.game) return;
+        this.renderPlayersTab();
+        this.renderActionsTab();
+        this.renderCardsTab();
+        this.updateTurnIndicator();
+        this.updateButtonsState();
+    }
+    
+    updateTurnIndicator() {
+        const player = this.game.currentPlayer;
+        const dot = document.getElementById('turnDot');
+        const text = document.getElementById('turnText');
+        
+        dot.style.background = CONFIG.PLAYER_COLORS[player.index];
+        dot.style.color = CONFIG.PLAYER_COLORS[player.index];
+        
+        if (this.game.phase === GAME_PHASE.SETUP) {
+            text.textContent = `Setup: ${player.name}`;
+        } else if (this.game.phase === GAME_PHASE.GAME_OVER) {
+            text.textContent = 'Game Over';
+        } else {
+            text.textContent = `${player.name}'s Turn`;
+        }
+    }
+    
+    updateButtonsState() {
+        const player = this.game.currentPlayer;
+        const rollBtn = document.getElementById('rollBtn');
+        const endTurnBtn = document.getElementById('endTurnBtn');
+        
+        rollBtn.disabled = !this.canRoll();
+        endTurnBtn.disabled = !this.canEndTurn();
+        
+        if (this.canRoll()) {
+            rollBtn.classList.add('pulse-gold');
+        } else {
+            rollBtn.classList.remove('pulse-gold');
+        }
+    }
+    
+    renderPlayersTab() {
+        const container = document.getElementById('tab-players');
+        container.innerHTML = '';
+        
+        this.game.players.forEach(player => {
+            const card = Utils.createElement('div', {
+                class: `player-card ${player.index === this.game.currentPlayerIndex ? 'current' : ''} ${player.index === this.game.winner ? 'winner' : ''}`
+            });
+            
+            const header = Utils.createElement('div', { class: 'player-header' });
+            const info = Utils.createElement('div', { class: 'player-info' });
+            
+            const avatar = Utils.createElement('div', {
+                class: 'player-avatar',
+                style: { background: CONFIG.PLAYER_COLORS[player.index] },
+                text: player.name.charAt(0).toUpperCase()
+            });
+            info.appendChild(avatar);
+            
+            const nameWrap = Utils.createElement('div');
+            nameWrap.appendChild(Utils.createElement('div', { class: 'player-name', text: player.name }));
+            if (player.isAI) {
+                nameWrap.appendChild(Utils.createElement('span', { class: 'player-type-badge', text: 'AI' }));
+            }
+            info.appendChild(nameWrap);
+            header.appendChild(info);
+            
+            const vp = Utils.createElement('div', { class: 'player-vp' });
+            vp.innerHTML = `🏆 ${player.totalVP} <span style="font-size:0.7rem; color:var(--color-text-dim)">/ ${this.game.vpTarget}</span>`;
+            header.appendChild(vp);
+            
+            card.appendChild(header);
+            
+            // Stats
+            const stats = Utils.createElement('div', { class: 'player-stats' });
+            const statData = [
+                { label: '🧱', value: player.resources.brick },
+                { label: '🪵', value: player.resources.lumber },
+                { label: '🐑', value: player.resources.wool },
+                { label: '🌾', value: player.resources.grain },
+                { label: '⛏', value: player.resources.ore }
+            ];
+            statData.forEach(s => {
+                const stat = Utils.createElement('div', { class: 'player-stat' });
+                stat.appendChild(Utils.createElement('div', { text: s.label }));
+                stat.appendChild(Utils.createElement('div', { class: 'player-stat-value', text: s.value.toString() }));
+                stats.appendChild(stat);
+            });
+            card.appendChild(stats);
+            
+            // Badges
+            const badges = Utils.createElement('div', { class: 'player-badges' });
+            if (player.hasLongestRoad) badges.appendChild(Utils.createElement('span', { class: 'badge', text: '🛤 Longest Road' }));
+            if (player.hasLargestArmy) badges.appendChild(Utils.createElement('span', { class: 'badge', text: '⚔ Largest Army' }));
+            if (player.playedKnights > 0) badges.appendChild(Utils.createElement('span', { class: 'badge', text: `🗡 ${player.playedKnights} Knights` }));
+            if (badges.children.length > 0) card.appendChild(badges);
+            
+            container.appendChild(card);
+        });
+    }
+    
+    renderActionsTab() {
+        const container = document.getElementById('tab-actions');
+        container.innerHTML = '';
+        
+        const player = this.game.currentPlayer;
+        if (player.isAI || this.game.phase !== GAME_PHASE.MAIN) {
+            container.appendChild(Utils.createElement('div', {
+                class: 'empty-state',
+                html: `<div class="empty-state-icon">⏳</div>Waiting for ${player.name}...`
+            }));
+            return;
+        }
+        
+        // Resource Bar
+        const resBar = Utils.createElement('div', { class: 'resource-bar' });
+        ['brick', 'lumber', 'wool', 'grain', 'ore'].forEach(res => {
+            const item = Utils.createElement('div', { class: 'resource-item' });
+            item.appendChild(Utils.createElement('div', { class: `resource-icon res-${res}`, text: CONFIG.RESOURCE_EMOJI[res] }));
+            item.appendChild(Utils.createElement('div', { class: 'resource-count', text: player.resources[res].toString() }));
+            resBar.appendChild(item);
+        });
+        container.appendChild(resBar);
+        
+        // Build Section
+        const buildSection = Utils.createElement('div', { class: 'action-section' });
+        buildSection.appendChild(Utils.createElement('div', { class: 'action-title', text: 'Build' }));
+        
+        const buildGrid = Utils.createElement('div', { class: 'action-grid' });
+        
+        const buildOptions = [
+            { type: 'road', icon: '🛤', label: 'Road', cost: '🧱🪵', can: player.canAfford('road') && player.hasPiece('road') },
+            { type: 'settlement', icon: '🏠', label: 'Settlement', cost: '🧱🪵🐑🌾', can: player.canAfford('settlement') && player.hasPiece('settlement') },
+            { type: 'city', icon: '🏰', label: 'City', cost: '🌾🌾⛏⛏⛏', can: player.canAfford('city') && player.hasPiece('city') && player.built.settlements.length > 0 },
+            { type: 'devCard', icon: '🃏', label: 'Dev Card', cost: '🐑🌾⛏', can: player.canAfford('devCard') }
+        ];
+        
+        buildOptions.forEach(opt => {
+            const btn = Utils.createElement('button', { class: 'action-btn' });
+            btn.disabled = !opt.can;
+            btn.innerHTML = `<span class="icon">${opt.icon}</span><span>${opt.label}</span><span class="cost">${opt.cost}</span>`;
+            btn.onclick = () => this.startBuildAction(opt.type);
+            buildGrid.appendChild(btn);
+        });
+        
+        buildSection.appendChild(buildGrid);
+        container.appendChild(buildSection);
+        
+        // Trade Section
+        const tradeSection = Utils.createElement('div', { class: 'action-section' });
+        tradeSection.appendChild(Utils.createElement('div', { class: 'action-title', text: 'Trade' }));
+        
+        const tradeGrid = Utils.createElement('div', { class: 'action-grid' });
+        
+        const bankBtn = Utils.createElement('button', { class: 'action-btn' });
+        bankBtn.innerHTML = `<span class="icon">🏦</span><span>Bank</span><span class="cost">4:1 Rate</span>`;
+        bankBtn.onclick = () => this.openBankTradeModal();
+        tradeGrid.appendChild(bankBtn);
+        
+        const playerBtn = Utils.createElement('button', { class: 'action-btn' });
+        playerBtn.innerHTML = `<span class="icon">🤝</span><span>Player</span><span class="cost">Negotiate</span>`;
+        playerBtn.onclick = () => this.openPlayerTradeModal();
+        tradeGrid.appendChild(playerBtn);
+        
+        tradeSection.appendChild(tradeGrid);
+        container.appendChild(tradeSection);
+    }
+    
+    renderCardsTab() {
+        const container = document.getElementById('tab-cards');
+        container.innerHTML = '';
+        
+        const player = this.game.currentPlayer;
+        if (player.isAI) {
+            container.appendChild(Utils.createElement('div', {
+                class: 'empty-state',
+                text: 'AI cards are hidden.'
+            }));
+            return;
+        }
+        
+        const list = Utils.createElement('div', { class: 'dev-cards-list' });
+        
+        const cardTypes = [
+            { type: 'knight', icon: '⚔️', name: 'Knight' },
+            { type: 'roadBuilding', icon: '🛤', name: 'Road Building' },
+            { type: 'yearOfPlenty', icon: '🌟', name: 'Year of Plenty' },
+            { type: 'monopoly', icon: '💸', name: 'Monopoly' },
+            { type: 'victoryPoint', icon: '🏆', name: 'Victory Point' }
+        ];
+        
+        let hasCards = false;
+        
+        cardTypes.forEach(ct => {
+            const count = player.countDevCards(ct.type, false);
+            if (count > 0) {
+                hasCards = true;
+                const row = Utils.createElement('div', {
+                    class: `dev-card-row ${ct.type !== 'victoryPoint' && player.canPlayDevCard(ct.type, this.game.turnNumber) && !this.game.hasPlayedDevCardThisTurn ? 'playable' : ''}`
+                });
+                
+                const info = Utils.createElement('div', { class: 'dev-card-info' });
+                info.appendChild(Utils.createElement('span', { text: `${ct.icon} ${ct.name}` }));
+                row.appendChild(info);
+                
+                row.appendChild(Utils.createElement('span', { class: 'dev-card-count', text: `×${count}` }));
+                
+                if (ct.type !== 'victoryPoint' && player.canPlayDevCard(ct.type, this.game.turnNumber) && !this.game.hasPlayedDevCardThisTurn) {
+                    row.onclick = () => this.playDevCard(ct.type);
+                }
+                
+                list.appendChild(row);
+            }
+        });
+        
+        if (!hasCards) {
+            container.appendChild(Utils.createElement('div', {
+                class: 'empty-state',
+                html: `<div class="empty-state-icon">🃏</div>No development cards yet.`
+            }));
+        } else {
+            container.appendChild(list);
+        }
+    }
+    
+    updateDiceDisplay() {
+        // Handled inline during roll
+    }
+    
+    setStatus(text) {
+        document.getElementById('actionStatus').textContent = text;
+    }
+    
+    addLog(message, type = 'normal') {
+        const container = document.getElementById('tab-log');
+        const entry = Utils.createElement('div', { class: `log-entry ${type}` });
+        entry.innerHTML = `<span class="log-time">${Utils.timeString()}</span> ${message}`;
+        container.insertBefore(entry, container.firstChild);
+        
+        // Keep log manageable
+        while (container.children.length > 100) {
+            container.removeChild(container.lastChild);
+        }
+    }
+    
+    cancelAction() {
+        this.selectedAction = null;
+        if (this.renderer) {
+            this.renderer.clearVertexMarkers();
+            this.renderer.clearEdgeMarkers();
+            this.renderer.clearGhost();
+        }
+        this.setStatus('Awaiting your command...');
+    }
+    
+    showFloatingResources(vertexId, resources) {
+        const vertex = this.game.board.vertices.find(v => v.id === vertexId);
+        if (!vertex || !this.renderer) return;
+        
+        const pos = this.renderer.getHexScreenPosition(this.game.board.hexes[vertex.hexes[0]].index);
+        if (!pos) return;
+        
+        let offset = 0;
+        Object.entries(resources).forEach(([res, count]) => {
+            FloatingResource.show(pos.x + offset, pos.y - 40, CONFIG.RESOURCE_EMOJI[res], count);
+            offset += 30;
+        });
+    }
+    
+    // --------------------------------------------------------
+    // SAVE / LOAD / QUIT / VICTORY
+    // --------------------------------------------------------
+    
+    saveGame() {
+        if (!this.game) return;
+        const data = {
+            state: this.game.serialize(),
+            setupConfig: this.setupConfig,
+            gameStats: this.gameStats
+        };
+        if (this.storage.save(this.storage.keys.SAVE, data)) {
+            this.toast.show('Game saved successfully', 'success');
+        } else {
+            this.toast.show('Failed to save game', 'error');
+        }
+    }
+    
+    loadGame() {
+        const data = this.storage.load(this.storage.keys.SAVE);
+        if (!data) {
+            this.toast.show('No saved game found', 'error');
+            return;
+        }
+        
+        try {
+            this.setupConfig = data.setupConfig;
+            this.gameStats = data.gameStats;
+            this.game = GameState.deserialize(data.state);
+            
+            // Re-init AI
+            this.aiPlayers.clear();
+            this.game.players.forEach(p => {
+                if (p.isAI) {
+                    this.aiPlayers.set(p.index, new AIPlayer(this.setupConfig.difficulty));
+                }
+            });
+            
+            // Re-init renderer
+            const svgEl = document.getElementById('board-svg');
+            this.renderer = new BoardRenderer(svgEl, this.grid);
+            this.renderer.renderBoard(this.game.board);
+            
+            // Rebuild visual state
+            this.game.players.forEach(p => {
+                p.built.settlements.forEach(vId => this.renderer.placeBuilding('settlement', vId, p.index, false));
+                p.built.cities.forEach(vId => this.renderer.placeBuilding('city', vId, p.index, false));
+                p.built.roads.forEach(eId => this.renderer.placeRoad(eId, p.index, false));
+            });
+            this.renderer.moveRobber(this.game.board.robberPosition, false);
+            
+            this.showScreen('game');
+            this.updateUI();
+            this.addLog('Game loaded', 'important');
+            this.toast.show('Game loaded', 'success');
+            
+            // Resume AI turn if necessary
+            if (this.game.currentPlayer.isAI && this.game.phase !== GAME_PHASE.SETUP) {
+                this.executeAITurn(this.game.currentPlayer);
+            }
+            
+        } catch (e) {
+            console.error('Load failed:', e);
+            this.toast.show('Failed to load save data', 'error');
+        }
+    }
+    
+    quitGame() {
+        this.modals.confirm(
+            'Quit Game',
+            'Are you sure you want to quit? Unsaved progress will be lost.',
+            () => {
+                this.game = null;
+                this.aiPlayers.clear();
+                this.showScreen('menu');
+                this.checkContinue();
+            }
+        );
+    }
+    
+    showInGameMenu() {
+        const content = Utils.createElement('div', {
+            style: { display: 'flex', flexDirection: 'column', gap: '0.75rem' }
+        });
+        
+        const resumeBtn = Utils.createElement('button', { class: 'menu-btn primary', text: '▶ Resume Game' });
+        resumeBtn.onclick = () => this.modals.close();
+        content.appendChild(resumeBtn);
+        
+        const saveBtn = Utils.createElement('button', { class: 'menu-btn', text: '💾 Save Game' });
+        saveBtn.onclick = () => { this.saveGame(); this.modals.close(); };
+        content.appendChild(saveBtn);
+        
+        const settingsBtn = Utils.createElement('button', { class: 'menu-btn', text: '⚙ Settings' });
+        settingsBtn.onclick = () => { this.settingsUI.show(); };
+        content.appendChild(settingsBtn);
+        
+        const quitBtn = Utils.createElement('button', { class: 'menu-btn', text: '✕ Quit to Menu' });
+        quitBtn.onclick = () => { this.modals.close(); this.quitGame(); };
+        content.appendChild(quitBtn);
+        
+        this.modals.open('⚓ Game Menu', content, []);
+    }
+    
+    async handleVictory(winnerIndex) {
+        const winner = this.game.players[winnerIndex];
+        this.game.phase = GAME_PHASE.GAME_OVER;
+        this.game.winner = winnerIndex;
+        
+        this.audio.victory();
+        this.addLog(`🏆 ${winner.name} WINS THE GAME! 🏆`, 'important');
+        
+        // Calculate stats
+        const playTime = Date.now() - this.gameStats.startTime;
+        const isHuman = !winner.isAI;
+        
+        // Check perfect VP
+        const hasSettlementVP = winner.built.settlements.length > 0;
+        const hasCityVP = winner.built.cities.length > 0;
+        const hasLongestRoad = winner.hasLongestRoad;
+        const hasLargestArmy = winner.hasLargestArmy;
+        const hasHiddenVP = winner.hiddenVP > 0;
+        const perfectVP = hasSettlementVP && hasCityVP && hasLongestRoad && hasLargestArmy && hasHiddenVP;
+        
+        // Check comeback
+        const wasLast = this.game.players.every(p => p.index === winnerIndex || p.totalVP >= winner.totalVP - 2); // Simplified
+        
+        const gameData = {
+            turns: this.game.turnNumber,
+            vp: winner.totalVP,
+            resources: this.gameStats.resources,
+            trades: this.gameStats.trades,
+            steals: this.gameStats.steals,
+            knights: this.gameStats.knights,
+            roads: this.gameStats.roads,
+            settlements: this.gameStats.settlements,
+            cities: this.gameStats.cities,
+            longestRoad: winner.hasLongestRoad,
+            largestArmy: winner.hasLargestArmy,
+            playTime,
+            perfectVP,
+            comeback: wasLast,
+            difficulty: this.setupConfig.difficulty
+        };
+        
+        const unlocked = this.statsManager.recordGameEnd(winnerIndex, isHuman, gameData);
+        
+        // Show Victory Modal
+        const content = Utils.createElement('div', { class: 'victory-content' });
+        content.appendChild(Utils.createElement('div', { class: 'victory-crown', text: '👑' }));
+        content.appendChild(Utils.createElement('div', { class: 'victory-title', text: 'VICTORY!' }));
+        content.appendChild(Utils.createElement('div', { class: 'victory-winner', text: `${winner.name} has conquered Catan!` }));
+        
+        const stats = Utils.createElement('div', { class: 'victory-stats' });
+        stats.appendChild(this.createVictoryStat('Turns', this.game.turnNumber));
+        stats.appendChild(this.createVictoryStat('VP', winner.totalVP));
+        stats.appendChild(this.createVictoryStat('Time', Utils.formatTime(Math.floor(playTime / 1000))));
+        content.appendChild(stats);
+        
+        if (unlocked.length > 0) {
+            const achDiv = Utils.createElement('div', {
+                style: { marginTop: '1rem', padding: '0.75rem', background: 'var(--color-surface)', borderRadius: '6px' }
+            });
+            achDiv.appendChild(Utils.createElement('div', {
+                style: { fontFamily: 'var(--font-display)', color: 'var(--color-gold-light)', marginBottom: '0.5rem' },
+                text: '🏅 Achievements Unlocked!'
+            }));
+            unlocked.forEach(id => {
+                const ach = ACHIEVEMENTS.find(a => a.id === id);
+                if (ach) {
+                    achDiv.appendChild(Utils.createElement('div', {
+                        style: { fontSize: '0.9rem', color: 'var(--color-text)' },
+                        text: `${ach.icon} ${ach.name}`
+                    }));
+                }
+            });
+            content.appendChild(achDiv);
+        }
+        
+        this.modals.open('🏆 Game Over', content, [
+            { text: 'Main Menu', onClick: () => { this.game = null; this.showScreen('menu'); this.checkContinue(); } },
+            { text: 'Play Again', class: 'primary', onClick: () => { this.showScreen('setup'); this.renderSetupPlayers(); } }
+        ]);
+    }
+    
+    createVictoryStat(label, value) {
+        const stat = Utils.createElement('div', { class: 'victory-stat' });
+        stat.appendChild(Utils.createElement('div', { class: 'victory-stat-label', text: label }));
+        stat.appendChild(Utils.createElement('div', { class: 'victory-stat-value', text: value.toString() }));
+        return stat;
+    }
+}
+
+// ============================================================
+// SECTION 20: BOOTSTRAP
+// ============================================================
+
+window.addEventListener('DOMContentLoaded', () => {
+    // Hide loading screen if present
+    const loader = document.querySelector('.loading-overlay');
+    if (loader) loader.style.display = 'none';
+    
+    // Initialize App
+    window.app = new GameApp();
+    
+    // Global error handler
+    window.addEventListener('error', (e) => {
+        console.error('Global error:', e.error);
+        if (window.app && window.app.toast) {
+            window.app.toast.show('An unexpected error occurred', 'error');
+        }
+    });
+});
+</script>
+</body>
+</html>
