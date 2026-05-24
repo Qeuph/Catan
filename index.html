@@ -3329,7 +3329,14 @@ class StatsManager {
     }
     
     reset() {
-        this.stats = this.loadStats.call({ loadStats: () => ({}) });
+        this.stats = this.loadStats();
+        // Reset to defaults
+        Object.keys(this.stats).forEach(k => {
+            if (typeof this.stats[k] === 'number') this.stats[k] = 0;
+        });
+        this.stats.lowestTurnsToWin = Infinity;
+        this.stats.winsAsPlayer = [0, 0, 0, 0];
+        this.stats.aiDifficultyWins = { easy: 0, normal: 0, hard: 0, expert: 0 };
         this.achievements = {};
         ACHIEVEMENTS.forEach(a => { this.achievements[a.id] = false; });
         this.saveStats();
@@ -4026,7 +4033,6 @@ class BoardRenderer {
             const mx = (edge.x1 + edge.x2) / 2;
             const my = (edge.y1 + edge.y2) / 2;
             
-            // Draw port marker
             const color = portColors[port.type] || '#ffffff';
             const label = portLabels[port.type] || '?';
             const emoji = portEmoji[port.type] || '?';
@@ -4036,40 +4042,66 @@ class BoardRenderer {
                 class: 'port-marker'
             });
             
+            // Outer ring for visibility
+            const outerRing = this.createSVGElement('circle', {
+                cx: 0, cy: 0, r: 19,
+                fill: 'rgba(0,0,0,0.5)',
+                'stroke-width': 0
+            });
+            g.appendChild(outerRing);
+            
             // Background circle
             const circle = this.createSVGElement('circle', {
-                cx: 0, cy: 0, r: 16,
+                cx: 0, cy: 0, r: 17,
                 fill: color,
-                stroke: 'rgba(0,0,0,0.5)',
+                stroke: 'rgba(255,255,255,0.4)',
                 'stroke-width': 1.5,
-                opacity: 0.9
+                opacity: 0.95
             });
             g.appendChild(circle);
             
-            // Port label
+            // Port label (rate)
             const text = this.createSVGElement('text', {
-                x: 0, y: -3,
+                x: 0, y: -4,
                 'text-anchor': 'middle',
                 'dominant-baseline': 'central',
                 'font-size': '8',
                 'font-weight': '700',
                 fill: port.type === 'wool' ? '#2a2a2a' : '#ffffff',
-                'font-family': 'var(--font-display, sans-serif)'
+                'font-family': 'var(--font-display, sans-serif)',
+                'pointer-events': 'none'
             });
             text.textContent = label;
             g.appendChild(text);
             
             const subText = this.createSVGElement('text', {
-                x: 0, y: 7,
+                x: 0, y: 8,
                 'text-anchor': 'middle',
                 'dominant-baseline': 'central',
                 'font-size': '9',
-                fill: port.type === 'wool' ? '#2a2a2a' : '#ffffff'
+                fill: port.type === 'wool' ? '#2a2a2a' : '#ffffff',
+                'pointer-events': 'none'
             });
             subText.textContent = emoji;
             g.appendChild(subText);
             
             portLayer.appendChild(g);
+            
+            // Draw dashed lines to port vertices to show which spots have port access
+            port.vertices.forEach(vId => {
+                const vertex = this.board.vertices.find(v => v.id === vId);
+                if (!vertex) return;
+                const line = this.createSVGElement('line', {
+                    x1: mx, y1: my,
+                    x2: vertex.x, y2: vertex.y,
+                    stroke: color,
+                    'stroke-width': '2',
+                    'stroke-dasharray': '4,3',
+                    opacity: '0.7',
+                    'pointer-events': 'none'
+                });
+                portLayer.insertBefore(line, g);
+            });
         });
     }
     
@@ -4138,15 +4170,22 @@ class BoardRenderer {
                 }
                 tokenGroup.appendChild(text);
                 
-                // Probability dots
+                // Probability dots - rendered as individual circles for clarity
                 const dots = CONFIG.PROBABILITY_DOTS[hex.token];
                 if (dots) {
-                    const dotsText = this.createSVGElement('text', {
-                        class: 'number-dots',
-                        x: 0, y: 12
-                    });
-                    dotsText.textContent = '•'.repeat(dots);
-                    tokenGroup.appendChild(dotsText);
+                    const dotColor = (hex.token === 6 || hex.token === 8) ? '#b91c1c' : '#5a3e1c';
+                    const dotSpacing = 5.5;
+                    const totalWidth = (dots - 1) * dotSpacing;
+                    for (let d = 0; d < dots; d++) {
+                        const dot = this.createSVGElement('circle', {
+                            cx: d * dotSpacing - totalWidth / 2,
+                            cy: 12,
+                            r: '2',
+                            fill: dotColor,
+                            'pointer-events': 'none'
+                        });
+                        tokenGroup.appendChild(dot);
+                    }
                 }
                 
                 group.appendChild(tokenGroup);
@@ -4905,7 +4944,9 @@ class Player {
      * Add a development card
      */
     addDevCard(card) {
-        this.devCards.push({ ...card, turnReceived: 0, played: false });
+        // Preserve turnReceived from the card so it cannot be played the same turn it's purchased
+        const turnReceived = (card && card.turnReceived != null) ? card.turnReceived : 0;
+        this.devCards.push({ ...card, turnReceived, played: false });
     }
     
     /**
@@ -5702,6 +5743,7 @@ class GameState {
         
         this.pendingActions = [];
         this.winner = null;
+        this.lastPlacedSettlement = null; // Track for setup road placement
         
         this.vpTarget = config.vpTarget || CONFIG.DEFAULT_VP_TARGET;
         this.gameStartTime = Date.now();
@@ -5788,8 +5830,13 @@ class GameState {
         // Check piece availability
         if (!isSetup && player.pieces.road <= 0) return false;
         
-        // During setup, just check if it connects to placed settlement
+        // During setup, road must connect only to the LAST placed settlement
         if (isSetup) {
+            const lastSettlement = this.lastPlacedSettlement;
+            if (lastSettlement) {
+                return edge.v1 === lastSettlement || edge.v2 === lastSettlement;
+            }
+            // Fallback: any settlement
             return player.built.settlements.includes(edge.v1) || 
                    player.built.settlements.includes(edge.v2);
         }
@@ -5910,6 +5957,9 @@ class GameState {
         player.pieces.settlement--;
         player.publicVP++;
         
+        // Track last placed settlement for setup road placement rules
+        this.lastPlacedSettlement = vertexId;
+        
         // Check for ports
         this.checkPortAccess(player, vertex);
         
@@ -5929,6 +5979,10 @@ class GameState {
         player.pieces.settlement++; // Return settlement piece
         player.pieces.city--;
         player.publicVP++; // City is 2 VP, settlement was 1 VP
+        
+        // Ensure port access is preserved (in case it wasn't set during settlement)
+        const vertex = this.board.vertices.find(v => v.id === vertexId);
+        if (vertex) this.checkPortAccess(player, vertex);
         
         return true;
     }
@@ -6322,7 +6376,8 @@ class GameState {
             largestArmySize: this.largestArmySize,
             vpTarget: this.vpTarget,
             gameStartTime: this.gameStartTime,
-            bank: this.bank
+            bank: this.bank,
+            lastPlacedSettlement: this.lastPlacedSettlement
         };
     }
     
@@ -6348,6 +6403,7 @@ class GameState {
         game.vpTarget = data.vpTarget;
         game.gameStartTime = data.gameStartTime;
         game.bank = data.bank || { brick: 19, lumber: 19, wool: 19, grain: 19, ore: 19 };
+        game.lastPlacedSettlement = data.lastPlacedSettlement || null;
         return game;
     }
 }
@@ -7271,7 +7327,13 @@ class GameApp {
         if (setupDone) {
             this.addLog('Setup complete! Game begins!', 'important');
             this.game.phase = GAME_PHASE.ROLL;
-            this.showTurnTransition(this.game.currentPlayer);
+            const firstPlayer = this.game.currentPlayer;
+            if (firstPlayer.isAI) {
+                // AI is first to play - need to trigger their turn
+                Utils.wait(600).then(() => this.rollDice());
+            } else {
+                this.showTurnTransition(firstPlayer);
+            }
         } else {
             this.processCurrentPlayerSetup();
         }
@@ -7330,6 +7392,22 @@ class GameApp {
         // Update small dice
         document.getElementById('dice1').textContent = d1;
         document.getElementById('dice2').textContent = d2;
+        const diceSum = Utils.createElement('div', {
+            style: {
+                fontSize: '0.7rem',
+                color: total === 7 ? 'var(--color-danger)' : 'var(--color-gold)',
+                fontWeight: '700',
+                textAlign: 'center',
+                minWidth: '20px'
+            },
+            text: `=${total}`
+        });
+        // Update or replace the sum display
+        const existingSum = document.getElementById('diceSum');
+        if (existingSum) existingSum.remove();
+        diceSum.id = 'diceSum';
+        document.getElementById('diceDisplay').appendChild(diceSum);
+        
         if (total === 7) {
             document.getElementById('dice1').classList.add('red');
             document.getElementById('dice2').classList.add('red');
@@ -7630,7 +7708,7 @@ class GameApp {
                 const remaining = count - discarded;
                 summary.textContent = `Discarded: ${discarded} / ${count}`;
                 summary.className = `trade-summary ${discarded === count ? 'valid' : 'invalid'}`;
-                confirmBtn.disabled = discarded !== count;
+                if (confirmBtn) confirmBtn.disabled = discarded !== count;
             };
             
             updateGrid();
@@ -7695,9 +7773,9 @@ class GameApp {
         
         this.audio.cardPlay();
         this.game.hasPlayedDevCardThisTurn = true;
-        this.gameStats.knights++;
         
         if (action.card === 'knight') {
+            this.gameStats.knights++;  // Only count knight cards
             this.addLog(`${player.name} played Knight`, 'important');
             if (action.data.hexIndex !== null) {
                 await this.moveRobber(player, action.data.hexIndex);
@@ -7716,7 +7794,7 @@ class GameApp {
         } else if (action.card === 'roadBuilding') {
             action.data.roads.forEach(edgeId => {
                 if (player.pieces.road > 0) {
-                    this.game.buildRoad(player.index, edgeId);
+                    this.game.buildRoad(player.index, edgeId);  // buildRoad already updates longest road
                     this.renderer.placeRoad(edgeId, player.index);
                     this.gameStats.roads++;
                 }
@@ -7806,6 +7884,9 @@ class GameApp {
         const prevPlayer = this.game.currentPlayer;
         this.game.nextPlayer();
         this.game.phase = GAME_PHASE.ROLL;
+        this.game.hasRolledThisTurn = false;
+        this.game.hasBuiltThisTurn = false;
+        this.game.hasPlayedDevCardThisTurn = false;
         
         const newPlayer = this.game.currentPlayer;
         this.addLog(`— ${newPlayer.name}'s turn (Round ${this.game.turnNumber}) —`, 'important');
@@ -7900,6 +7981,9 @@ class GameApp {
             this.toast.show('Road built!', 'success');
             this.cancelAction();
             this.updateUI();
+            
+            const winner = this.game.checkWin();
+            if (winner !== null) this.handleVictory(winner);
         });
         
         // Hover ghost
@@ -8444,6 +8528,7 @@ class GameApp {
                 // Give
                 const gRow = Utils.createElement('div', { class: 'trade-resource-row' });
                 gRow.appendChild(Utils.createElement('div', { class: `resource-icon res-${res}`, text: CONFIG.RESOURCE_EMOJI[res] }));
+                gRow.appendChild(Utils.createElement('div', { class: 'trade-resource-name', text: CONFIG.RESOURCE_NAMES[res] }));
                 const gCounter = Utils.createElement('div', { class: 'trade-counter' });
                 const gMinus = Utils.createElement('button', { class: 'trade-counter-btn', text: '-' });
                 gMinus.disabled = giveRes[res] <= 0;
@@ -8459,6 +8544,7 @@ class GameApp {
                 // Get
                 const rRow = Utils.createElement('div', { class: 'trade-resource-row' });
                 rRow.appendChild(Utils.createElement('div', { class: `resource-icon res-${res}`, text: CONFIG.RESOURCE_EMOJI[res] }));
+                rRow.appendChild(Utils.createElement('div', { class: 'trade-resource-name', text: CONFIG.RESOURCE_NAMES[res] }));
                 const rCounter = Utils.createElement('div', { class: 'trade-counter' });
                 const rMinus = Utils.createElement('button', { class: 'trade-counter-btn', text: '-' });
                 rMinus.disabled = getRes[res] <= 0;
@@ -8637,9 +8723,32 @@ class GameApp {
             info.appendChild(nameWrap);
             header.appendChild(info);
             
+            const vpContainer = Utils.createElement('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.2rem' } });
             const vp = Utils.createElement('div', { class: 'player-vp' });
             vp.innerHTML = `🏆 ${player.totalVP} <span style="font-size:0.7rem; color:var(--color-text-dim)">/ ${this.game.vpTarget}</span>`;
-            header.appendChild(vp);
+            vpContainer.appendChild(vp);
+            
+            // VP progress bar
+            const progressBar = Utils.createElement('div', {
+                style: {
+                    width: '80px', height: '4px', background: 'var(--color-surface-hover)',
+                    borderRadius: '2px', overflow: 'hidden'
+                }
+            });
+            const progressFill = Utils.createElement('div', {
+                style: {
+                    height: '100%',
+                    width: `${Math.min(100, (player.totalVP / this.game.vpTarget) * 100)}%`,
+                    background: player.totalVP >= this.game.vpTarget ? 'var(--color-success)' :
+                                player.totalVP >= this.game.vpTarget - 2 ? 'var(--color-warning)' :
+                                'var(--color-gold)',
+                    borderRadius: '2px',
+                    transition: 'width 0.5s ease'
+                }
+            });
+            progressBar.appendChild(progressFill);
+            vpContainer.appendChild(progressBar);
+            header.appendChild(vpContainer);
             
             card.appendChild(header);
             
@@ -8659,6 +8768,19 @@ class GameApp {
                 stats.appendChild(stat);
             });
             card.appendChild(stats);
+            
+            // Total resource count
+            const totalRes = player.totalResources;
+            if (totalRes > 0) {
+                const totalLabel = Utils.createElement('div', {
+                    style: {
+                        fontSize: '0.65rem', color: 'var(--color-text-dim)',
+                        textAlign: 'right', marginTop: '0.15rem', marginBottom: '0.25rem'
+                    },
+                    text: `${totalRes} card${totalRes !== 1 ? 's' : ''} in hand`
+                });
+                card.appendChild(totalLabel);
+            }
             
             // Badges
             const badges = Utils.createElement('div', { class: 'player-badges' });
@@ -8698,10 +8820,12 @@ class GameApp {
         
         // ROLL phase - only show roll button hint
         if (this.game.phase === GAME_PHASE.ROLL) {
-            container.appendChild(Utils.createElement('div', {
-                class: 'empty-state',
-                html: `<div class="empty-state-icon">🎲</div>Roll the dice to begin your turn!<br><small style="color:var(--color-gold)">[R] to roll</small>`
-            }));
+            const rollHint = Utils.createElement('div', { class: 'empty-state' });
+            rollHint.innerHTML = `<div class="empty-state-icon">🎲</div>
+                <div style="font-weight:600;font-size:1rem;margin-bottom:0.5rem">Ready to Roll!</div>
+                Roll the dice to collect resources.<br>
+                <small style="color:var(--color-gold)">[R] to roll quickly</small>`;
+            container.appendChild(rollHint);
             return;
         }
         
@@ -8730,15 +8854,22 @@ class GameApp {
         const buildGrid = Utils.createElement('div', { class: 'action-grid' });
         
         const buildOptions = [
-            { type: 'road', icon: '🛤', label: 'Road', cost: '🧱🪵', can: player.canAfford('road') && player.hasPiece('road') },
-            { type: 'settlement', icon: '🏠', label: 'Settlement', cost: '🧱🪵🐑🌾', can: player.canAfford('settlement') && player.hasPiece('settlement') },
-            { type: 'city', icon: '🏰', label: 'City', cost: '🌾🌾⛏⛏⛏', can: player.canAfford('city') && player.hasPiece('city') && player.built.settlements.length > 0 },
-            { type: 'devCard', icon: '🃏', label: 'Dev Card', cost: '🐑🌾⛏', can: player.canAfford('devCard') && this.game.devCardDeck.length > 0 && !this.game.hasBuiltThisTurn }
+            { type: 'road', icon: '🛤', label: 'Road', cost: '🧱🪵', can: player.canAfford('road') && player.hasPiece('road'), 
+              cantReason: !player.hasPiece('road') ? 'No pieces left' : 'Need 🧱+🪵' },
+            { type: 'settlement', icon: '🏠', label: 'Settlement', cost: '🧱🪵🐑🌾', can: player.canAfford('settlement') && player.hasPiece('settlement'),
+              cantReason: !player.hasPiece('settlement') ? 'No pieces left' : 'Need 🧱🪵🐑🌾' },
+            { type: 'city', icon: '🏰', label: 'City', cost: '🌾🌾⛏⛏⛏', can: player.canAfford('city') && player.hasPiece('city') && player.built.settlements.length > 0,
+              cantReason: player.built.settlements.length === 0 ? 'No settlements to upgrade' : !player.hasPiece('city') ? 'No pieces left' : 'Need 🌾🌾⛏⛏⛏' },
+            { type: 'devCard', icon: '🃏', label: 'Dev Card', cost: '🐑🌾⛏', can: player.canAfford('devCard') && this.game.devCardDeck.length > 0 && !this.game.hasBuiltThisTurn,
+              cantReason: this.game.hasBuiltThisTurn ? 'Already bought this turn' : this.game.devCardDeck.length === 0 ? 'Deck empty' : 'Need 🐑🌾⛏' }
         ];
         
         buildOptions.forEach(opt => {
             const btn = Utils.createElement('button', { class: 'action-btn' });
             btn.disabled = !opt.can;
+            if (!opt.can) {
+                btn.title = opt.cantReason;
+            }
             btn.innerHTML = `<span class="icon">${opt.icon}</span><span>${opt.label}</span><span class="cost">${opt.cost}</span>`;
             btn.onclick = () => this.startBuildAction(opt.type);
             buildGrid.appendChild(btn);
@@ -8880,6 +9011,35 @@ class GameApp {
     
     updateDiceDisplay() {
         // Handled inline during roll
+    }
+    
+    // Keyboard shortcut helpers
+    showBuildOptions() {
+        // Switch to actions tab and show a helpful build prompt
+        document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        const actionsTab = document.querySelector('[data-tab="actions"]');
+        const actionsPanel = document.getElementById('tab-actions');
+        if (actionsTab) actionsTab.classList.add('active');
+        if (actionsPanel) actionsPanel.classList.add('active');
+        this.toast.show('Build menu — select an option below', 'info', 2000);
+    }
+    
+    showTradeModal() {
+        if (this.game && this.game.phase === GAME_PHASE.MAIN && !this.game.currentPlayer.isAI) {
+            this.openBankTradeModal();
+        }
+    }
+    
+    showPlayDevCardModal() {
+        // Switch to cards tab
+        document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        const cardsTab = document.querySelector('[data-tab="cards"]');
+        const cardsPanel = document.getElementById('tab-cards');
+        if (cardsTab) cardsTab.classList.add('active');
+        if (cardsPanel) cardsPanel.classList.add('active');
+        this.toast.show('Development cards — click a card to play it', 'info', 2000);
     }
     
     setStatus(text) {
