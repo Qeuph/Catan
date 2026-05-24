@@ -1,75 +1,72 @@
-# Catan
-https://qeuph.github.io/Catan/
-## Complete Description of the Catan Board Game
+# Catan — Single-File Web Edition
 
-Catan is a strategy board game for 3–4 players (2 players in some variants) where each player leads a small colony on an island made of hexagonal terrain tiles. The objective is to be the first player to reach **10 victory points**.
+Play here: https://qeuph.github.io/Catan/
 
-### Core idea
-Players collect and spend resources to build roads, settlements, and cities. Resource production depends on dice rolls and where you place settlements.
+This project is a polished, browser-based Catan adaptation built in a **single `index.html` file** (no build step required).
 
-### Components (base game)
-- 19 terrain hexes:
-  - 3 brick hills
-  - 4 lumber forests
-  - 4 wool pastures
-  - 4 grain fields
-  - 3 ore mountains
-  - 1 desert
-- Number tokens (2–12, excluding 7 on tiles)
-- Robber piece (starts on the desert)
-- Player pieces (roads, settlements, cities)
-- Development cards
-- Resource cards
+## What’s Improved
 
-### Setup
-1. Build the island board from 19 hexes and place number tokens on non-desert hexes.
-2. Place robber on the desert.
-3. Each player places one settlement + one connected road in turn order.
-4. Then players place a second settlement + connected road in reverse order.
-5. After second placement, each player collects 1 resource from each adjacent producing hex.
+Recent improvements focused on reliability and smooth gameplay:
 
-### Turn structure
-1. **Roll dice (2d6)**
-   - Terrain hexes with the rolled number produce resources.
-   - Players with settlements adjacent to those hexes gain 1 card of that resource.
-   - Cities gain 2 cards.
-2. **If 7 is rolled**
-   - Players with more than 7 cards discard half (rounded down).
-   - Active player moves robber to any hex.
-   - That player steals 1 random resource from a player with a building adjacent to that hex.
-3. **Trade**
-   - With other players (any negotiated trade).
-   - With bank (typically 4:1, better rates with ports).
-4. **Build / Buy / Play cards**
-   - Build road: 1 brick + 1 lumber
-   - Build settlement: 1 brick + 1 lumber + 1 wool + 1 grain
-   - Build city: 2 grain + 3 ore (upgrades a settlement)
-   - Buy development card: 1 wool + 1 grain + 1 ore
-5. **End turn**
+- **Auto-save system**
+  - The game now auto-saves every 30 seconds during active play.
+  - A final silent save is attempted on tab close / refresh.
+- **Better keyboard controls**
+  - `R` = Roll dice
+  - `E` = End turn
+  - `1` = Open build menu
+  - `2` = Open trade menu
+  - `3` = Open development card menu
+  - `4` = Buy development card
+  - `M` = Toggle music on/off
+  - `Ctrl/Cmd + S` = Save game now
+  - `Esc` = Cancel current placement/action
+- **Safer game lifecycle handling**
+  - Auto-save starts on new game and loaded games.
+  - Auto-save is stopped when quitting the game.
+  - Manual save still exists for explicit snapshots.
 
-### Development cards (base)
-- **Knight**: Move robber, possibly steal.
-- **Road Building**: Place 2 free roads.
-- **Year of Plenty**: Take any 2 resources from bank.
-- **Monopoly**: Claim all cards of one resource type from opponents.
-- **Victory Point**: Hidden point card.
+## How to Run
 
-### Scoring and win condition
-Victory points come from:
-- Settlement: 1 VP
-- City: 2 VP
-- Largest Army: 2 VP (first to 3+ played knights and most)
-- Longest Road: 2 VP (road length 5+ and longest)
-- Victory Point development cards: 1 VP each
+### Local (recommended)
+1. Clone the repository.
+2. Open `index.html` in any modern desktop browser (Chrome, Edge, Firefox, Safari).
 
-First player to **10 VP** wins.
+That’s it—no install, no bundler, no dependencies.
 
-## Playable Single-File Web Version
-Open `index.html` in a browser. It includes a local multiplayer adaptation with:
-- Full hex board and number token generation
+## Game Overview
+
+Catan is a strategy board game where players race to **10 victory points** by collecting resources and building:
+- Roads
+- Settlements
+- Cities
+
+### Win condition
+First player to 10 VP wins.
+
+## Features
+
+- Full randomized 19-hex island setup
+- Resource production by dice roll
 - Robber movement and stealing
-- Building roads, settlements, and cities
-- Development cards
-- Longest Road and Largest Army scoring
-- Bank trade and simple player trade
-- Automatic win detection
+- Building roads / settlements / cities
+- Development cards (Knight, Road Building, Monopoly, Year of Plenty, VP)
+- Largest Army and Longest Road awards
+- Human + AI players
+- In-game statistics and achievements
+- Save/load support via local storage
+
+## Controls Quick Reference
+
+### Mouse / UI
+- Use bottom action buttons for rolling and ending turn.
+- Use side actions for building, trading, dev cards, and menu actions.
+
+### Keyboard
+- `R`, `E`, `1`, `2`, `3`, `4`, `M`, `Esc`, `Ctrl/Cmd + S`
+
+## Notes
+
+- Save data and settings are stored in browser local storage.
+- “Continue” on the main menu appears when a save exists.
+- For best experience, use a desktop browser with audio enabled.

@@ -6642,6 +6642,7 @@ class GameApp {
         // UI state
         this.selectedAction = null;
         this.currentModal = null;
+        this.autoSaveTimer = null;
         
         // Initialize
         this.initScreens();
@@ -6908,6 +6909,7 @@ class GameApp {
         this.initGameUI();
         this.updateUI();
         this.addLog(`Game started! First to ${this.game.vpTarget} VP wins.`, 'important');
+        this.startAutoSave();
         
         // Start setup phase
         this.startSetupPhase();
@@ -6929,12 +6931,38 @@ class GameApp {
         document.addEventListener('keydown', (e) => {
             if (this.modals.isOpen()) return;
             
-            switch (e.key.toLowerCase()) {
+            const key = e.key.toLowerCase();
+            const ctrlOrMeta = e.ctrlKey || e.metaKey;
+
+            if (ctrlOrMeta && key === 's') {
+                e.preventDefault();
+                this.saveGame(false);
+                return;
+            }
+
+            switch (key) {
                 case 'r':
                     if (this.game && this.canRoll()) this.handleRoll();
                     break;
                 case 'e':
                     if (this.game && this.canEndTurn()) this.handleEndTurn();
+                    break;
+                case '1':
+                    if (this.game && this.game.phase === GAME_PHASE.MAIN) this.showBuildOptions();
+                    break;
+                case '2':
+                    if (this.game && this.game.phase === GAME_PHASE.MAIN) this.showTradeModal();
+                    break;
+                case '3':
+                    if (this.game && this.game.phase === GAME_PHASE.MAIN) this.showPlayDevCardModal();
+                    break;
+                case '4':
+                    if (this.game && this.game.phase === GAME_PHASE.MAIN) this.buyDevCard(this.game.currentPlayer);
+                    break;
+                case 'm':
+                    this.settings.toggle('musicEnabled');
+                    this.audio.updateFromSettings();
+                    this.toast.show(`Music ${this.settings.get('musicEnabled') ? 'enabled' : 'muted'}`, 'info', 1800);
                     break;
                 case 'escape':
                     this.cancelAction();
@@ -8635,8 +8663,32 @@ class GameApp {
     // --------------------------------------------------------
     // SAVE / LOAD / QUIT / VICTORY
     // --------------------------------------------------------
+
+    startAutoSave() {
+        this.stopAutoSave();
+        this.autoSaveTimer = setInterval(() => {
+            if (this.game && this.game.phase !== GAME_PHASE.GAME_OVER) {
+                this.saveGame(true);
+            }
+        }, 30000);
+
+        window.onbeforeunload = () => {
+            if (this.game && this.game.phase !== GAME_PHASE.GAME_OVER) {
+                this.saveGame(true);
+            }
+        };
+    }
+
+    stopAutoSave() {
+        if (this.autoSaveTimer) {
+            clearInterval(this.autoSaveTimer);
+            this.autoSaveTimer = null;
+        }
+        window.onbeforeunload = null;
+    }
+
     
-    saveGame() {
+    saveGame(isAuto = false) {
         if (!this.game) return;
         const data = {
             state: this.game.serialize(),
@@ -8644,8 +8696,8 @@ class GameApp {
             gameStats: this.gameStats
         };
         if (this.storage.save(this.storage.keys.SAVE, data)) {
-            this.toast.show('Game saved successfully', 'success');
-        } else {
+            if (!isAuto) this.toast.show('Game saved successfully', 'success');
+        } else if (!isAuto) {
             this.toast.show('Failed to save game', 'error');
         }
     }
@@ -8686,6 +8738,7 @@ class GameApp {
             this.showScreen('game');
             this.updateUI();
             this.addLog('Game loaded', 'important');
+            this.startAutoSave();
             this.toast.show('Game loaded', 'success');
             
             // Resume AI turn if necessary
@@ -8704,6 +8757,7 @@ class GameApp {
             'Quit Game',
             'Are you sure you want to quit? Unsaved progress will be lost.',
             () => {
+                this.stopAutoSave();
                 this.game = null;
                 this.aiPlayers.clear();
                 this.showScreen('menu');
