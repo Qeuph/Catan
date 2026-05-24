@@ -403,7 +403,7 @@ input, select {
 
 .player-count-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 0.5rem;
 }
 
@@ -2492,8 +2492,22 @@ input, select {
                     <span class="turn-dot" id="turnDot"></span>
                     <span id="turnText">Setup Phase</span>
                 </div>
+                <div class="turn-counter" id="turnCounter" style="
+                    padding: 0.4rem 0.65rem;
+                    background: var(--color-surface);
+                    border: 1px solid var(--color-surface-hover);
+                    border-radius: 4px;
+                    font-size: 0.75rem;
+                    color: var(--color-text-dim);
+                    display: none;
+                ">Round <span id="roundNum">1</span></div>
             </div>
             <div class="topbar-right">
+                <div id="diceHistoryBar" style="
+                    display: flex; gap: 0.2rem; align-items: center;
+                    padding: 0 0.5rem;
+                "></div>
+                <button class="icon-btn" data-action="toggle-sound" id="soundBtn" title="Toggle Sound">🔊</button>
                 <button class="icon-btn" data-action="help" title="Help">?</button>
                 <button class="icon-btn" data-action="save" title="Save">💾</button>
                 <button class="icon-btn" data-action="quit" title="Quit">✕</button>
@@ -3637,15 +3651,8 @@ class BoardGenerator {
      * Generate number tokens for standard Catan
      */
     generateTokens() {
-        const tokens = [...CONFIG.STANDARD_TOKENS];
-        const shuffled = Utils.shuffle(tokens);
-        // Insert a placeholder for desert (no token)
-        const result = [];
-        let tokenIdx = 0;
-        for (let i = 0; i < 19; i++) {
-            result.push(shuffled[tokenIdx++]);
-        }
-        return result;
+        // 18 standard tokens for 19 hexes (desert has no token)
+        return Utils.shuffle([...CONFIG.STANDARD_TOKENS]);
     }
     
     /**
@@ -4688,7 +4695,13 @@ class BoardRenderer {
         let startPan = { x: 0, y: 0 };
         
         this.svg.addEventListener('mousedown', (e) => {
-            if (e.target === this.svg || e.target.tagName === 'rect') {
+            // Don't start panning if there are active markers (placement mode)
+            const hasActiveMarkers = this.vertexLayer.querySelector('.vertex-marker.show') ||
+                                     this.edgeLayer.querySelector('.edge-marker.show');
+            if (hasActiveMarkers) return;
+            if (e.target === this.svg || e.target.tagName === 'rect' || 
+                (e.target.tagName === 'polygon' && !e.target.closest('.building')) ||
+                e.target.tagName === 'ellipse') {
                 isPanning = true;
                 startPoint = { x: e.clientX, y: e.clientY };
                 startPan = { ...this.pan };
@@ -6863,6 +6876,7 @@ class GameApp {
         this.selectedAction = null;
         this.currentModal = null;
         this.autoSaveTimer = null;
+        this.diceHistory = []; // Track recent rolls
         
         // Initialize
         this.initScreens();
@@ -6959,6 +6973,15 @@ class GameApp {
                 break;
             case 'zoom-reset':
                 this.renderer.resetView();
+                break;
+            case 'toggle-sound':
+                {
+                    const en = this.settings.toggle('soundEnabled');
+                    this.audio.updateFromSettings(this.settings);
+                    const btn = document.getElementById('soundBtn');
+                    if (btn) btn.textContent = en ? '🔊' : '🔇';
+                    this.toast.show(`Sound ${en ? 'enabled' : 'muted'}`, 'info', 1500);
+                }
                 break;
             case 'close-modal':
                 this.modals.close();
@@ -7136,15 +7159,18 @@ class GameApp {
     }
     
     initGameUI() {
-        // Sidebar tabs
-        document.querySelectorAll('.sidebar-tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-                tab.classList.add('active');
-                document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
+        // Sidebar tabs — only register once
+        if (!this._gameUIInited) {
+            this._gameUIInited = true;
+            document.querySelectorAll('.sidebar-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+                    tab.classList.add('active');
+                    document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
+                });
             });
-        });
+        }
     }
     
     initKeyboard() {
@@ -7420,6 +7446,11 @@ class GameApp {
         this.game.hasRolledThisTurn = true;
         this.game.lastRolledSeven = (total === 7);
         
+        // Track dice history
+        this.diceHistory.unshift({ d1, d2, total });
+        if (this.diceHistory.length > 8) this.diceHistory.pop();
+        this.updateDiceHistory();
+        
         this.addLog(`${player.name} rolled ${d1} + ${d2} = ${total}`, total === 7 ? 'warning' : 'important');
         
         // Process roll
@@ -7654,16 +7685,29 @@ class GameApp {
             const content = Utils.createElement('div');
             content.appendChild(Utils.createElement('div', {
                 class: 'discard-info',
-                html: `You rolled a 7! You must discard <strong>${count}</strong> cards (you have ${player.totalResources}).`
+                html: `⚠ You rolled a 7! Discard <strong>${count}</strong> cards. (You have ${player.totalResources})`
             }));
             
             let toDiscard = { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 };
             let discarded = 0;
             
+            const grid = Utils.createElement('div', { class: 'discard-grid' });
+            content.appendChild(grid);
+            
+            const summary = Utils.createElement('div', {
+                class: 'trade-summary',
+                id: 'discardSummary'
+            });
+            content.appendChild(summary);
+            
             const updateGrid = () => {
                 grid.innerHTML = '';
                 ['brick', 'lumber', 'wool', 'grain', 'ore'].forEach(res => {
-                    const item = Utils.createElement('div', { class: 'discard-resource' });
+                    if (player.resources[res] <= 0) return;
+                    const item = Utils.createElement('div', {
+                        class: `discard-resource ${toDiscard[res] > 0 ? 'selected' : ''}`,
+                        style: { position: 'relative' }
+                    });
                     item.appendChild(Utils.createElement('div', {
                         class: `resource-icon res-${res}`,
                         text: CONFIG.RESOURCE_EMOJI[res]
@@ -7671,6 +7715,21 @@ class GameApp {
                     item.appendChild(Utils.createElement('div', {
                         text: `${toDiscard[res]} / ${player.resources[res]}`
                     }));
+                    
+                    if (toDiscard[res] > 0) {
+                        const badge = Utils.createElement('div', {
+                            style: {
+                                position: 'absolute', top: '4px', right: '4px',
+                                background: 'var(--color-danger)',
+                                color: 'white', borderRadius: '50%',
+                                width: '18px', height: '18px',
+                                fontSize: '0.7rem', fontWeight: '700',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center'
+                            },
+                            text: String(toDiscard[res])
+                        });
+                        item.appendChild(badge);
+                    }
                     
                     item.addEventListener('click', () => {
                         if (discarded < count && toDiscard[res] < player.resources[res]) {
@@ -7695,18 +7754,13 @@ class GameApp {
                 });
             };
             
-            const grid = Utils.createElement('div', { class: 'discard-grid' });
-            content.appendChild(grid);
-            
-            const summary = Utils.createElement('div', {
-                class: 'trade-summary',
-                id: 'discardSummary'
-            });
-            content.appendChild(summary);
-            
             const updateSummary = () => {
                 const remaining = count - discarded;
-                summary.textContent = `Discarded: ${discarded} / ${count}`;
+                if (remaining > 0) {
+                    summary.textContent = `Discarded: ${discarded} / ${count} — ${remaining} more needed`;
+                } else {
+                    summary.textContent = `✓ Ready to discard ${count} cards`;
+                }
                 summary.className = `trade-summary ${discarded === count ? 'valid' : 'invalid'}`;
                 if (confirmBtn) confirmBtn.disabled = discarded !== count;
             };
@@ -7715,9 +7769,9 @@ class GameApp {
             updateSummary();
             
             let confirmBtn;
-            this.modals.open(`Discard ${count} Cards`, content, [
+            this.modals.open(`⚠ Discard ${count} Cards — ${player.name}`, content, [
                 {
-                    text: 'Confirm',
+                    text: 'Confirm Discard',
                     class: 'primary',
                     onClick: () => {
                         player.removeResources(toDiscard);
@@ -8245,35 +8299,69 @@ class GameApp {
         
         let chosen = [];
         const grid = Utils.createElement('div', { class: 'discard-grid' });
-        
-        const updateGrid = () => {
+        const statusEl = Utils.createElement('div', {
+            class: 'trade-summary',
+            style: { marginTop: '0.75rem' },
+            text: 'Select 2 resources (can pick same resource twice)'
+        });
+
+        const renderGrid = () => {
             grid.innerHTML = '';
             ['brick', 'lumber', 'wool', 'grain', 'ore'].forEach(res => {
-                const item = Utils.createElement('div', { class: 'discard-resource' });
+                const count = chosen.filter(r => r === res).length;
+                const item = Utils.createElement('div', {
+                    class: `discard-resource ${count > 0 ? 'selected' : ''}`,
+                    style: { position: 'relative', cursor: chosen.length < 2 || count > 0 ? 'pointer' : 'not-allowed' }
+                });
                 item.appendChild(Utils.createElement('div', {
                     class: `resource-icon res-${res}`,
                     text: CONFIG.RESOURCE_EMOJI[res]
                 }));
-                item.appendChild(Utils.createElement('div', {
-                    text: CONFIG.RESOURCE_NAMES[res]
-                }));
-                
+                item.appendChild(Utils.createElement('div', { text: CONFIG.RESOURCE_NAMES[res] }));
+                if (count > 0) {
+                    const badge = Utils.createElement('div', {
+                        style: {
+                            position: 'absolute', top: '4px', right: '4px',
+                            background: 'var(--color-gold)',
+                            color: 'var(--color-bg-deep)',
+                            borderRadius: '50%',
+                            width: '18px', height: '18px',
+                            fontSize: '0.7rem', fontWeight: '700',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        },
+                        text: String(count)
+                    });
+                    item.appendChild(badge);
+                }
                 item.addEventListener('click', () => {
-                    if (chosen.length < 2) {
-                        chosen.push(res);
-                        item.classList.add('selected');
-                        if (chosen.length === 2) {
-                            confirmBtn.disabled = false;
+                    if (chosen.length >= 2) {
+                        // Remove one of this resource if already selected
+                        const idx = chosen.indexOf(res);
+                        if (idx !== -1) {
+                            chosen.splice(idx, 1);
+                            renderGrid();
+                            updateStatus();
                         }
+                        return;
                     }
+                    chosen.push(res);
+                    if (confirmBtn) confirmBtn.disabled = chosen.length < 2;
+                    renderGrid();
+                    updateStatus();
                 });
-                
                 grid.appendChild(item);
             });
         };
+
+        const updateStatus = () => {
+            if (chosen.length === 0) statusEl.textContent = 'Select 2 resources';
+            else if (chosen.length === 1) statusEl.textContent = `Selected: ${CONFIG.RESOURCE_EMOJI[chosen[0]]} — pick 1 more`;
+            else statusEl.textContent = `Selected: ${chosen.map(r => CONFIG.RESOURCE_EMOJI[r]).join(' ')} — ready!`;
+        };
         
-        updateGrid();
+        renderGrid();
         content.appendChild(grid);
+        content.appendChild(statusEl);
         
         let confirmBtn;
         this.modals.open('🌟 Year of Plenty', content, [
@@ -8423,7 +8511,7 @@ class GameApp {
                 rMinus.onclick = () => { getRes[res]--; updateUI(); };
                 const rVal = Utils.createElement('span', { class: 'trade-counter-value', text: getRes[res].toString() });
                 const rPlus = Utils.createElement('button', { class: 'trade-counter-btn', text: '+' });
-                rPlus.disabled = getRes[res] >= 1;
+                rPlus.disabled = getRes[res] >= 3; // Allow getting up to 3
                 rPlus.onclick = () => { getRes[res]++; updateUI(); };
                 rCounter.append(rMinus, rVal, rPlus);
                 rRow.appendChild(rCounter);
@@ -8437,19 +8525,24 @@ class GameApp {
             let isValid = false;
             let message = 'Select resources to trade';
             
-            if (totalGet === 1 && giveKeys.length === 1) {
+            if (totalGet >= 1 && giveKeys.length === 1) {
                 const [gRes, gAmt] = giveKeys[0];
                 const rate = getRate(gRes);
-                if (gAmt === rate) {
+                if (gAmt > 0 && gAmt % rate === 0 && totalGet === gAmt / rate) {
                     isValid = true;
-                    message = `Trade ${rate} ${CONFIG.RESOURCE_NAMES[gRes]} → 1 ${getKey ? CONFIG.RESOURCE_NAMES[getKey] : '?'}`;
+                    const getStr = Object.entries(getRes).filter(([_, v]) => v > 0).map(([r, c]) => `${c > 1 ? c + '×' : ''}${CONFIG.RESOURCE_NAMES[r]}`).join(' + ');
+                    message = `Trade ${gAmt} ${CONFIG.RESOURCE_NAMES[gRes]} → ${getStr}`;
+                } else if (totalGet > gAmt / rate) {
+                    message = `Too many resources requested (max ${Math.floor(gAmt / rate)} for ${gAmt} given)`;
                 } else {
-                    message = `Need ${rate} ${CONFIG.RESOURCE_NAMES[gRes]} (your rate with ports)`;
+                    message = `Need ${rate * totalGet} ${CONFIG.RESOURCE_NAMES[gRes]} (${rate}:1 rate)`;
                 }
-            } else if (totalGet > 1) {
-                message = 'Bank gives only 1 resource per trade';
-            } else if (giveKeys.length > 1) {
+            } else if (totalGet > 1 && giveKeys.length > 1) {
                 message = 'Give only one type of resource at a time';
+            } else if (totalGet === 0) {
+                message = 'Select resources to receive';
+            } else if (giveKeys.length === 0) {
+                message = 'Select resources to give';
             }
             
             summary.textContent = message;
@@ -8607,8 +8700,40 @@ class GameApp {
             });
             
             if (!canAccept) continue;
+
+            // AI opponents auto-respond based on simple logic
+            if (opp.isAI) {
+                const ai = this.aiPlayers.get(opp.index);
+                // AI accepts if what they receive is something they need
+                const needs = ai ? ai.identifyResourceNeeds(this.game, opp) : [];
+                const theyReceive = Object.keys(give);
+                const theyGive = Object.keys(get);
+                
+                // Check if what opp receives is useful
+                const useful = theyReceive.some(r => needs.includes(r));
+                // Check if what opp gives away they have surplus of
+                const hasSurplus = theyGive.every(r => {
+                    const needed = get[r];
+                    return opp.resources[r] >= needed + 2; // Keep a buffer
+                });
+                
+                const aiAccepts = useful && hasSurplus && Math.random() > 0.25;
+                if (aiAccepts) {
+                    initiator.removeResources(give);
+                    initiator.addResources(get);
+                    opp.removeResources(get);
+                    opp.addResources(give);
+                    
+                    this.audio.trade();
+                    this.addLog(`${initiator.name} traded with ${opp.name} (AI accepted)`, 'success');
+                    this.gameStats.trades++;
+                    this.updateUI();
+                    return;
+                }
+                continue; // AI rejected
+            }
             
-            // Prompt opponent
+            // Prompt human opponent
             const accepted = await this.promptTradeResponse(initiator, opp, give, get);
             if (accepted) {
                 // Execute trade
@@ -8662,22 +8787,29 @@ class GameApp {
         this.renderCardsTab();
         this.updateTurnIndicator();
         this.updateButtonsState();
+        this.updateStatusWithHints();
     }
     
     updateTurnIndicator() {
         const player = this.game.currentPlayer;
         const dot = document.getElementById('turnDot');
         const text = document.getElementById('turnText');
+        const counter = document.getElementById('turnCounter');
+        const roundNum = document.getElementById('roundNum');
         
         dot.style.background = CONFIG.PLAYER_COLORS[player.index];
         dot.style.color = CONFIG.PLAYER_COLORS[player.index];
         
         if (this.game.phase === GAME_PHASE.SETUP) {
             text.textContent = `Setup: ${player.name}`;
+            if (counter) counter.style.display = 'none';
         } else if (this.game.phase === GAME_PHASE.GAME_OVER) {
             text.textContent = 'Game Over';
+            if (counter) counter.style.display = 'none';
         } else {
             text.textContent = `${player.name}'s Turn`;
+            if (counter) { counter.style.display = ''; }
+            if (roundNum) roundNum.textContent = this.game.turnNumber;
         }
     }
     
@@ -9013,6 +9145,30 @@ class GameApp {
         // Handled inline during roll
     }
     
+    updateDiceHistory() {
+        const bar = document.getElementById('diceHistoryBar');
+        if (!bar) return;
+        bar.innerHTML = '';
+        this.diceHistory.forEach((roll, i) => {
+            const chip = document.createElement('div');
+            chip.style.cssText = `
+                font-size: ${i === 0 ? '0.85rem' : '0.7rem'};
+                font-weight: 700;
+                padding: 0.15rem 0.35rem;
+                border-radius: 3px;
+                background: ${roll.total === 7 ? 'rgba(239,68,68,0.2)' : i === 0 ? 'var(--color-surface-hover)' : 'var(--color-surface)'};
+                color: ${roll.total === 7 ? 'var(--color-danger)' : roll.total === 6 || roll.total === 8 ? 'var(--color-warning)' : 'var(--color-text-dim)'};
+                border: 1px solid ${i === 0 ? 'var(--color-surface-hover)' : 'transparent'};
+                opacity: ${1 - i * 0.1};
+                line-height: 1.2;
+                cursor: default;
+            `;
+            chip.title = `Rolled ${roll.d1}+${roll.d2}=${roll.total}`;
+            chip.textContent = roll.total;
+            bar.appendChild(chip);
+        });
+    }
+    
     // Keyboard shortcut helpers
     showBuildOptions() {
         // Switch to actions tab and show a helpful build prompt
@@ -9043,7 +9199,18 @@ class GameApp {
     }
     
     setStatus(text) {
-        document.getElementById('actionStatus').textContent = text;
+        const el = document.getElementById('actionStatus');
+        if (el) el.textContent = text;
+    }
+    
+    updateStatusWithHints() {
+        const g = this.game;
+        if (!g) return;
+        if (g.phase === GAME_PHASE.ROLL && !g.currentPlayer.isAI) {
+            this.setStatus('🎲 Roll dice to begin your turn  [R]');
+        } else if (g.phase === GAME_PHASE.MAIN && !g.currentPlayer.isAI) {
+            this.setStatus('⚔ Build, trade, or end turn  [E to end]');
+        }
     }
     
     addLog(message, type = 'normal') {
@@ -9223,8 +9390,6 @@ class GameApp {
         const winner = this.game.players[winnerIndex];
         this.game.phase = GAME_PHASE.GAME_OVER;
         this.game.winner = winnerIndex;
-        
-        this.audio.victory();
         this.addLog(`🏆 ${winner.name} WINS THE GAME! 🏆`, 'important');
         this.stopAutoSave();
         
